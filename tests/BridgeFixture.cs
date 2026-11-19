@@ -37,7 +37,16 @@ static class BridgeFixture
         string command = args[0];
         string id = command == "resolve" || command == "expand" ? Field(args[2], 5) : "";
         File.AppendAllText(Path.Combine(Root, "requests.log"), command + "\t" + id + Environment.NewLine);
-        if (command == "search")
+        if (command == "source-options")
+        {
+            Console.WriteLine("SOURCE\t11111111111111111111111111111111\t" + Encode("测试音源一") + "\t1");
+            Console.WriteLine("SITE\t11111111111111111111111111111111\tqq\t" + Encode("QQ音乐") + "\ttrack,album,artist,playlist");
+            Console.WriteLine("SITE\t11111111111111111111111111111111\tqishui\t" + Encode("汽水音乐") + "\tunavailable");
+            Console.WriteLine("SOURCE\t22222222222222222222222222222222\t" + Encode("测试音源二") + "\t0");
+            Console.WriteLine("SITE\t22222222222222222222222222222222\tmigu\t" + Encode("咪咕音乐") + "\ttrack");
+        }
+        else if (command == "check-update") Emit("OK", "当前已是最新版本（测试）");
+        else if (command == "search")
         {
             Console.WriteLine("ITEM\t" + Item(args[3], "first", "回车测试结果一"));
             Console.WriteLine("ITEM\t" + Item(args[3], "second", "回车测试结果二"));

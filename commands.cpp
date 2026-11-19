@@ -127,7 +127,26 @@ std::string site_label(const std::string& site) {
     if (site == "netease") return "网易云音乐";
     if (site == "kuwo") return "酷我音乐";
     if (site == "migu") return "咪咕音乐";
+    if (site == "qishui") return "汽水音乐";
     return site;
+}
+
+std::vector<SourceOption> source_options(const BridgeResult& result) {
+    std::vector<SourceOption> sources;
+    for (const auto& line : result.lines) {
+        const auto& f = line.fields;
+        if (f.size() >= 4 && f[0] == "SOURCE") {
+            if (f[1].size() != 32 || f[1].find_first_not_of("0123456789abcdef") != std::string::npos) continue;
+            sources.push_back({ f[1], base64url_decode(f[2]), f[3] == "1", {} });
+        } else if (f.size() >= 5 && f[0] == "SITE") {
+            if (f[4] == "unavailable") continue;
+            // Keep source-declared platforms extensible, with safe CLI IDs.
+            if (f[2].empty() || f[2].size() > 32 || f[2].find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_-") != std::string::npos) continue;
+            for (auto& source : sources) if (source.id == f[1])
+                source.sites.push_back({ f[2], base64url_decode(f[3]), f[4].find("album") != std::string::npos, f[4] != "unavailable" });
+        }
+    }
+    return sources;
 }
 
 bool confirm_script_import() {
@@ -136,13 +155,14 @@ bool confirm_script_import() {
         L"导入 LX 音源", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES;
 }
 
-void start_bridge_message(const char* title, std::vector<std::string> args) {
+void start_bridge_message(const char* title, std::vector<std::string> args, std::function<void()> next = {}) {
     run_task(title,
         [args = std::move(args)](async_state& state, threaded_process_status& status, abort_callback& abort) {
             status.set_item("正在调用 LX 音源桥接…");
             state.result = run_bridge(args, abort);
         },
-        [](async_state& state) {
+        [next](async_state& state) {
+            if (next) { next(); return; }
             auto message = bridge_message(state.result);
             if (message.empty()) message = "操作完成";
             popup_message::g_show(message.c_str(), "LX 在线音乐");
@@ -335,20 +355,80 @@ std::string strip_lrc_timestamps(const std::string& raw) {
 } // namespace
 
 void command_search() {
-    SearchOptions options;
-    if (!show_search_dialog(options)) return;
-    const auto playlist = "LX " + site_label(options.site) + " " + type_label(options.type) + " - " + options.keyword;
-    run_task("LX 在线音乐搜索",
-        [options](async_state& state, threaded_process_status& status, abort_callback& abort) {
-            status.set_item(("正在搜索：" + options.keyword).c_str());
-            state.result = run_bridge({ "search", options.site, options.type,
-                base64url_encode_text(options.keyword), "1", "30", options.quality }, abort);
-            state.items = bridge_items(state.result);
-            if (state.items.empty()) throw std::runtime_error("没有找到匹配结果");
+    run_task("读取音源",
+        [](async_state& state, threaded_process_status&, abort_callback& abort) {
+            state.result = run_bridge({ "source-options" }, abort);
         },
-        [playlist](async_state& state) {
-            add_payloads_to_playlist(state.items, playlist);
-        }, true);
+        [](async_state& state) {
+            const auto sources = source_options(state.result);
+            if (sources.empty()) {
+                popup_message::g_show("请先在“文件 → LX 在线音乐 → 管理音源”导入脚本。", "LX 在线音乐");
+                return;
+            }
+            SearchOptions options;
+            if (!show_search_dialog(options, sources)) return;
+            const auto playlist = "LX " + site_label(options.site) + " " + type_label(options.type) + " - " + options.keyword;
+            run_task("LX 在线音乐搜索",
+                [options](async_state& search, threaded_process_status&, abort_callback& abort) {
+                    search.result = run_bridge({ "search", options.site, options.type,
+                        base64url_encode_text(options.keyword), "1", "30", options.quality, options.source }, abort);
+                    search.items = bridge_items(search.result);
+                    if (search.items.empty()) throw std::runtime_error("没有找到匹配结果");
+                },
+                [playlist](async_state& search) { add_payloads_to_playlist(search.items, playlist); }, true);
+        });
+}
+
+void command_manage_sources() {
+    run_task("管理音源",
+        [](async_state& state, threaded_process_status&, abort_callback& abort) { state.result = run_bridge({ "source-options" }, abort); },
+        [](async_state& state) {
+            const auto sources = source_options(state.result);
+            std::string selected;
+            const auto action = show_source_manager(sources, selected);
+            if (action == SourceAction::close) return;
+            std::vector<std::string> args;
+            if (action == SourceAction::select) {
+                args = { "select-source", selected };
+            } else if (action == SourceAction::remove) {
+                if (MessageBoxW(core_api::get_main_window(), L"删除选中的音源？其他音源会保留。", L"管理音源",
+                    MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) { command_manage_sources(); return; }
+                args = { "remove-source", selected };
+            } else {
+                if (!confirm_script_import()) { command_manage_sources(); return; }
+                if (action == SourceAction::import_file) {
+                    pfc::string8 path;
+                    if (!uGetOpenFileName(core_api::get_main_window(), "JavaScript 音源脚本|*.js|所有文件|*.*", 0,
+                        "js", "选择 LX 音源脚本", nullptr, path, FALSE)) { command_manage_sources(); return; }
+                    args = { "import-file", base64url_encode_text(path.c_str()) };
+                } else {
+                    std::string url;
+                    if (!show_url_dialog(url)) { command_manage_sources(); return; }
+                    args = { "import-url", base64url_encode_text(url) };
+                }
+            }
+            start_bridge_message("管理音源", std::move(args), command_manage_sources);
+        });
+}
+
+void command_check_update() {
+    run_task("检查更新",
+        [](async_state& state, threaded_process_status&, abort_callback& abort) { state.result = run_bridge({ "check-update", kVersion }, abort); },
+        [](async_state& state) {
+            for (const auto& line : state.result.lines) {
+                if (line.fields.size() >= 2 && line.fields[0] == "UPDATE") {
+                    const auto url = base64url_decode(line.fields[1]);
+                    if (url.rfind("https://github.com/lumiliya2009/foo_lxmusic/releases/tag/", 0) != 0)
+                        throw std::runtime_error("更新地址无效");
+                    const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(core_api::get_main_window(), L"open",
+                        pfc::stringcvt::string_wide_from_utf8(url.c_str()), nullptr, nullptr, SW_SHOWNORMAL));
+                    if (result <= 32) throw std::runtime_error("无法打开浏览器，请访问项目的 GitHub 发布页");
+                    return;
+                }
+            }
+            const auto message = bridge_message(state.result);
+            popup_message::g_show(message.c_str(), "LX 在线音乐");
+        });
 }
 
 void command_import_file() {
@@ -591,21 +671,22 @@ static const GUID guid_import_url = { 0xc5ad0577, 0x594f, 0x4b75,{ 0x8c, 0xf4, 0
 static const GUID guid_status = { 0xd745217e, 0x38c1, 0x4b35,{ 0xa2, 0x3c, 0x91, 0x61, 0xf2, 0x5f, 0xbb, 0x8f } };
 static const GUID guid_remove = { 0x37dd5e63, 0x2860, 0x4a60,{ 0x93, 0x34, 0xe6, 0x19, 0x5e, 0xe4, 0x7c, 0xb4 } };
 static const GUID guid_lyrics_main = { 0x85d64b42, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_manage = { 0x85d64b43, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_update = { 0x85d64b44, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 static mainmenu_group_popup_factory g_main_group(guid_main_group, mainmenu_groups::file,
     mainmenu_commands::sort_priority_dontcare, "LX 在线音乐");
 
 class main_commands : public mainmenu_commands {
 public:
-    enum { search, import_file, import_url, status, remove, lyrics, count };
+    enum { search, manage, update, lyrics, count };
     t_uint32 get_command_count() override { return count; }
     GUID get_command(t_uint32 index) override {
-        static const GUID values[] = { guid_search, guid_import_file, guid_import_url, guid_status, guid_remove, guid_lyrics_main };
+        static const GUID values[] = { guid_search, guid_manage, guid_update, guid_lyrics_main };
         return index < count ? values[index] : pfc::guid_null;
     }
     void get_name(t_uint32 index, pfc::string_base& out) override {
-        static const char* values[] = { "搜索在线音乐…", "导入本地 LX 音源…", "从网址导入 LX 音源…",
-            "查看音源状态", "删除当前音源", "获取所选歌曲歌词" };
+        static const char* values[] = { "搜索在线音乐…", "管理音源…", "检查更新", "获取所选歌曲歌词" };
         if (index < count) out = values[index];
     }
     bool get_description(t_uint32 index, pfc::string_base& out) override {
@@ -617,10 +698,8 @@ public:
     void execute(t_uint32 index, service_ptr_t<service_base>) override {
         switch (index) {
         case search: command_search(); break;
-        case import_file: command_import_file(); break;
-        case import_url: command_import_url(); break;
-        case status: command_source_status(); break;
-        case remove: command_remove_source(); break;
+        case manage: command_manage_sources(); break;
+        case update: command_check_update(); break;
         case lyrics: { auto items = selected_playlist_items(); command_lyrics(items); break; }
         default: break;
         }

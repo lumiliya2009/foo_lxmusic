@@ -25,6 +25,7 @@ public:
         m_resolve_calls = 0;
         m_more = false;
         m_last_media_error.clear();
+        m_source.clear();
         try {
             initialize(abort);
         } catch (const exception_aborted&) {
@@ -145,7 +146,12 @@ private:
         // Authentication/rate limits require user intervention or waiting.
         // Retry media rejection and invalid files, never source credentials.
         if (has_status(message, "401") || has_status(message, "429")) return false;
-        if (dynamic_cast<const exception_io_data*>(&error)) return true;
+        // Decoder modules can be built without C++ RTTI. A dynamic_cast on
+        // their exception objects can itself throw "no RTTI data". Use the
+        // exception handler's type matching instead; this runs inside a catch.
+        try { throw; }
+        catch (const exception_io_data&) { return true; }
+        catch (...) {}
         return has_status(message, "403") || has_status(message, "404") || has_status(message, "410") ||
             has_status(message, "500") || has_status(message, "502") || has_status(message, "503");
     }
@@ -165,16 +171,21 @@ private:
             abort.check();
             m_decoder.release();
             std::vector<std::string> args{ "resolve", m_encoded, m_quality };
-            if (!m_tried.empty()) {
+            if (!m_tried.empty() || !m_source.empty()) {
                 std::string excluded;
                 for (const auto& q : m_tried) { if (!excluded.empty()) excluded += ','; excluded += q; }
-                args.push_back(excluded);
+                args.push_back(excluded.empty() ? "-" : excluded);
+                if (!m_source.empty()) args.push_back(m_source);
             }
             const auto before = m_tried.size();
             m_more = false;
             ++m_resolve_calls;
             const auto result = lxmusic::run_bridge(args, abort, [this](const lxmusic::BridgeLine& line) {
                 if (line.fields.size() >= 2 && line.fields[0] == "TRIED") remember_quality(line.fields[1]);
+                if (line.fields.size() >= 2 && line.fields[0] == "SOURCEID") {
+                    const auto& id = line.fields[1];
+                    if (id.size() == 32 && id.find_first_not_of("0123456789abcdef") == std::string::npos) m_source = id;
+                }
             });
             std::string url, actual = m_quality;
             for (const auto& line : result.lines) {
@@ -254,7 +265,7 @@ private:
     input_decoder::ptr m_decoder;
     file_info_impl m_stream_info;
     std::vector<std::string> m_tried, m_urls;
-    std::string m_quality, m_last_media_error;
+    std::string m_quality, m_last_media_error, m_source;
     unsigned m_flags = 0, m_resolve_calls = 0;
     double m_position = 0;
     bool m_more = false, m_info_pending = false;

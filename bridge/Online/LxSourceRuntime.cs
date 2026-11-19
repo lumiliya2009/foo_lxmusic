@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
@@ -82,12 +83,13 @@ namespace LxMusic.Bridge.Online
                 foreach (var work in _queue.GetConsumingEnumerable())
                 {
                     try { work(); }
-                    catch { }
+                    catch (Exception ex) { FailPending(ex); }
                 }
             }
             catch (Exception ex)
             {
                 _loadError = ex;
+                FailPending(ex);
                 if (!_initialized.Task.IsCompleted)
                     _initialized.TrySetException(new InvalidOperationException("在线音源脚本加载失败：" + ex.Message, ex));
             }
@@ -104,6 +106,8 @@ namespace LxMusic.Bridge.Online
             var engine = new Engine(options => options
                 .LimitRecursion(256)
                 .MaxStatements(4_000_000)
+                .CatchClrExceptions(ex => ex is ArgumentException || ex is FormatException ||
+                    ex is InvalidDataException || ex is CryptographicException || ex is InvalidOperationException)
                 .Strict(false));
 
             engine.SetValue("__lx_native_call__", new Func<string, string, string, JsValue>(NativeCall));
@@ -112,8 +116,12 @@ namespace LxMusic.Bridge.Online
                 new Func<string, string>(value => Convert.ToBase64String(Encoding.UTF8.GetBytes(value ?? string.Empty))));
             engine.SetValue("__lx_native_call__utils_b642buf", new Func<string, string>(Base64ToJsonArray));
             engine.SetValue("__lx_native_call__utils_str2md5", new Func<string, string>(TextUtil.Md5Hex));
-            engine.SetValue("__lx_native_call__utils_aes_encrypt", new Func<string, string, string, int, string>(AesEncrypt));
-            engine.SetValue("__lx_native_call__utils_rsa_encrypt", new Func<string, string, int, string>(RsaEncrypt));
+            engine.SetValue("__lx_native_call__utils_aes_encrypt", new Func<string, string, string, string, string>(AesEncrypt));
+            engine.SetValue("__lx_native_call__utils_rsa_encrypt", new Func<string, string, string, string>(RsaEncrypt));
+            engine.SetValue("__lx_native_call__utils_bytes2b64", new Func<string, string>(value => Convert.ToBase64String(JsonBytes(value))));
+            engine.SetValue("__lx_native_call__utils_bytes2utf8", new Func<string, string>(value => Encoding.UTF8.GetString(JsonBytes(value))));
+            engine.SetValue("__lx_native_call__utils_inflate", new Func<string, string>(value => Compress(value, false)));
+            engine.SetValue("__lx_native_call__utils_deflate", new Func<string, string>(value => Compress(value, true)));
             engine.SetValue("__lx_native_call__utils_random_bytes", new Func<int, string>(size =>
             {
                 var buffer = new byte[Math.Max(0, size)];
@@ -195,6 +203,8 @@ namespace LxMusic.Bridge.Online
                 }
                 var info = payload["info"] as JObject ?? payload;
                 var descriptor = ParseDescriptor(info);
+                if (descriptor.Name == "LX 在线音源") descriptor.Name = Metadata("name", descriptor.Name);
+                if (string.IsNullOrWhiteSpace(descriptor.Version)) descriptor.Version = Metadata("version", string.Empty);
                 _descriptor = descriptor;
                 _initialized.TrySetResult(descriptor);
             }
@@ -220,6 +230,7 @@ namespace LxMusic.Bridge.Online
                     var actions = new List<string> { "musicUrl" };
                     if (property.Value is JObject sourceObject)
                     {
+                        descriptor.Names[property.Name] = sourceObject.Value<string>("name") ?? property.Name;
                         var qualityToken = sourceObject["qualitys"] ?? sourceObject["qualities"];
                         if (qualityToken is JArray qualityArray)
                             qualities.AddRange(qualityArray.Values<string>().Where(x => !string.IsNullOrWhiteSpace(x)));
@@ -352,7 +363,13 @@ namespace LxMusic.Bridge.Online
 
         private void DrainMicrotasks()
         {
-            try { _engine.Advanced.ProcessTasks(); } catch { }
+            _engine.Advanced.ProcessTasks();
+        }
+
+        private void FailPending(Exception error)
+        {
+            foreach (var key in _pending.Keys)
+                if (_pending.TryRemove(key, out var pending)) pending.TrySetException(error);
         }
 
         /// <summary>调用音源处理一次 request 事件，返回 result.data 的 JSON 文本。</summary>
@@ -425,7 +442,7 @@ namespace LxMusic.Bridge.Online
                 OptInt(options, "timeout", DefaultRequestTimeoutMs),
                 OptInt(options, "maxBytes", MaxScriptResponseBytes),
                 OptInt(options, "follow_max", OptInt(options, "followMax", DefaultFollowMax)),
-                handle);
+                handle, useSystemProxy: true);
 
             var headerJson = new JObject();
             foreach (var header in response.Headers)
@@ -599,7 +616,57 @@ namespace LxMusic.Bridge.Online
             return builder.ToString();
         }
 
-        private static string AesEncrypt(string dataBase64, string keyBase64, string ivBase64, int mode)
+        private static byte[] JsonBytes(string value)
+        {
+            var array = JArray.Parse(value);
+            if (array.Count > 1024 * 1024) throw new InvalidOperationException("Buffer is too large");
+            return array.Select(item => (byte)(item.Value<int>() & 255)).ToArray();
+        }
+
+        private static uint Adler32(byte[] data)
+        {
+            uint a = 1, b = 0;
+            foreach (var value in data) { a = (a + value) % 65521; b = (b + a) % 65521; }
+            return (b << 16) | a;
+        }
+
+        private static string Compress(string base64, bool compress)
+        {
+            var input = Convert.FromBase64String(base64);
+            if (input.Length > 1024 * 1024) throw new InvalidOperationException("Buffer is too large");
+            using (var output = new MemoryStream())
+            {
+                if (compress)
+                {
+                    output.WriteByte(0x78); output.WriteByte(0x9c);
+                    using (var stream = new DeflateStream(output, CompressionMode.Compress, true)) stream.Write(input, 0, input.Length);
+                    var checksum = Adler32(input);
+                    for (var shift = 24; shift >= 0; shift -= 8) output.WriteByte((byte)(checksum >> shift));
+                }
+                else
+                {
+                    if (input.Length < 6 || (input[0] & 15) != 8 || ((input[0] << 8) + input[1]) % 31 != 0 || (input[1] & 32) != 0)
+                        throw new InvalidDataException("Invalid zlib data");
+                    using (var compressed = new MemoryStream(input, 2, input.Length - 6))
+                    using (var stream = new DeflateStream(compressed, CompressionMode.Decompress))
+                    {
+                        var block = new byte[8192];
+                        int count;
+                        while ((count = stream.Read(block, 0, block.Length)) > 0)
+                        {
+                            if (output.Length + count > 1024 * 1024) throw new InvalidDataException("Inflated data is too large");
+                            output.Write(block, 0, count);
+                        }
+                    }
+                    uint expected = 0;
+                    for (var i = input.Length - 4; i < input.Length; ++i) expected = (expected << 8) | input[i];
+                    if (Adler32(output.ToArray()) != expected) throw new InvalidDataException("Invalid zlib checksum");
+                }
+                return Convert.ToBase64String(output.ToArray());
+            }
+        }
+
+        private static string AesEncrypt(string dataBase64, string keyBase64, string ivBase64, string mode)
         {
             var data = Convert.FromBase64String(dataBase64 ?? string.Empty);
             var key = Convert.FromBase64String(keyBase64 ?? string.Empty);
@@ -620,7 +687,7 @@ namespace LxMusic.Bridge.Online
             }
         }
 
-        private static string RsaEncrypt(string dataBase64, string keyBase64, int padding)
+        private static string RsaEncrypt(string dataBase64, string keyBase64, string padding)
         {
             var data = Convert.FromBase64String(dataBase64 ?? string.Empty);
             var parameters = ParseSubjectPublicKeyInfo(keyBase64);

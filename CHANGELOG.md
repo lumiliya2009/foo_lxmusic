@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7
+
+- Save multiple sources, switch them in search, and list supported searchable platforms.
+- Add source management, Kuwo/Migu track search and a GitHub update check.
+- Improve LX script compatibility and fix playback fallback with decoders built without RTTI.
+
 ## 0.1.6
 
 - Show the decoder's actual sample rate, bitrate, channels and codec during playback.

@@ -4,6 +4,7 @@ namespace lxmusic {
 
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 constexpr const char* kSchemeSuffix = ".lxmusic";
+constexpr const char* kVersion = "0.1.7";
 
 enum PayloadField : size_t {
     pf_version = 0,
@@ -45,11 +46,20 @@ struct BridgeResult {
 using BridgeLineCallback = std::function<void(const BridgeLine&)>;
 
 struct SearchOptions {
+    std::string source;
     std::string keyword;
     std::string site;
     std::string type;
     std::string quality;
 };
+
+struct SourceSite { std::string id, label; bool collections = false, searchable = true; };
+struct SourceOption {
+    std::string id, name;
+    bool active = false;
+    std::vector<SourceSite> sites;
+};
+enum class SourceAction { close, import_file, import_url, remove, select };
 
 std::string base64url_encode(const void* data, size_t bytes);
 std::string base64url_encode_text(const std::string& text);
@@ -78,7 +88,8 @@ metadb_handle_list selected_playlist_items();
 std::string payload_for_handle(metadb_handle_ptr handle);
 std::string lyric_payload_for_handle(metadb_handle_ptr handle);
 
-bool show_search_dialog(SearchOptions& options);
+bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources);
+SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected);
 bool show_url_dialog(std::string& url);
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics);
 bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality);
@@ -88,6 +99,8 @@ void command_import_file();
 void command_import_url();
 void command_remove_source();
 void command_source_status();
+void command_manage_sources();
+void command_check_update();
 void command_lyrics(metadb_handle_list_cref items);
 void command_expand(metadb_handle_list_cref items);
 void command_download(metadb_handle_list_cref items);

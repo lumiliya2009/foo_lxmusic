@@ -31,7 +31,7 @@ namespace LxMusic.Bridge.Online
         {
             var cleanUrl = (subscriptionUrl ?? string.Empty).Trim();
             if (cleanUrl.Length < 8 || cleanUrl.Length > 4096) throw new InvalidOperationException("订阅地址无效");
-            var response = OnlineHttp.Execute(cleanUrl, maxBytes: 2 * 1024 * 1024);
+            var response = OnlineHttp.Execute(cleanUrl, maxBytes: 2 * 1024 * 1024, useSystemProxy: true);
             if (!response.Ok) throw new InvalidOperationException(HttpError(response.StatusCode));
             var script = response.Body.TrimStart('\uFEFF');
             if (script.Length < 32) throw new InvalidOperationException("订阅返回的音源脚本为空");
@@ -48,10 +48,10 @@ namespace LxMusic.Bridge.Online
             var script = System.IO.File.ReadAllText(path, Encoding.UTF8).TrimStart('\uFEFF');
             if (script.Length < 32) throw new InvalidOperationException("音源脚本内容为空");
             if (string.IsNullOrWhiteSpace(displayName)) displayName = System.IO.Path.GetFileNameWithoutExtension(path);
-            return ImportScript(script, string.Empty, displayName);
+            return ImportScript(script, string.Empty, displayName, "file:" + System.IO.Path.GetFullPath(path));
         }
 
-        private LxSourceDescriptor ImportScript(string script, string subscriptionUrl, string displayName)
+        private LxSourceDescriptor ImportScript(string script, string subscriptionUrl, string displayName, string origin = null)
         {
             var runtime = LxSourceRuntime.Create(script, BuildRuntimeKey(script), TimeSpan.FromSeconds(25));
             try
@@ -59,7 +59,7 @@ namespace LxMusic.Bridge.Online
                 var descriptor = runtime.Descriptor;
                 lock (_runtimeSync)
                 {
-                    Sources.Save(subscriptionUrl, script, descriptor, displayName);
+                    Sources.Save(subscriptionUrl, script, descriptor, displayName, origin);
                     _runtime?.Dispose();
                     _runtime = runtime;
                     _runtimeScript = script;
@@ -73,14 +73,14 @@ namespace LxMusic.Bridge.Online
             }
         }
 
-        public void ResetSource()
+        public void ResetSource(string id = null)
         {
             lock (_runtimeSync)
             {
                 _runtime?.Dispose();
                 _runtime = null;
                 _runtimeScript = null;
-                Sources.Remove();
+                Sources.Remove(id);
             }
         }
 
@@ -140,7 +140,7 @@ namespace LxMusic.Bridge.Online
             if (ReferenceEquals(platform, OnlinePlatform.Qq)) return SortTracks(SearchQq(clean, page, limit));
             if (ReferenceEquals(platform, OnlinePlatform.Kugou)) return SortTracks(SearchKugou(clean, page, limit));
             if (ReferenceEquals(platform, OnlinePlatform.Netease)) return SortTracks(SearchNetease(clean, page, limit));
-            throw new InvalidOperationException("不支持的平台");
+            return SortTracks(ExtendedCatalog.Search(platform, clean, page, limit));
         }
 
         private static bool IsSearchAction(string action) =>
@@ -366,6 +366,10 @@ namespace LxMusic.Bridge.Online
             var message = AllMessages(error).ToLowerInvariant();
             string[] fatal = { "鉴权", "订阅失效", "订阅过期", "401", "429", "请求过速", "过于频繁" };
             if (fatal.Any(message.Contains)) return false;
+            // One timed-out provider in an aggregate source must not mask
+            // another provider's per-quality "no data" result.
+            if ((message.Contains("所有后端均失败") || message.Contains("all backends failed")) &&
+                new[] { "无数据", "音质", "未获取到", "未返回", "no data", "not found" }.Any(message.Contains)) return true;
             string[] retry = { "音质不可用", "音质不支持", "不支持该音质", "没有该音质", "无此音质", "未获取到url", "没有返回可播放地址", "媒体服务器" };
             if (retry.Any(message.Contains)) return true;
             string[] stop = { "订阅", "403", "timeout", "超时" };
@@ -389,6 +393,8 @@ namespace LxMusic.Bridge.Online
             if (message.Contains("请求过速") || message.Contains("429")) return "请求过于频繁，请稍后重试";
             if (message.IndexOf("未获取到URL", StringComparison.OrdinalIgnoreCase) >= 0) return "当前歌曲所选音质不可用";
             if (message.Contains("在线音源请求超时")) return "在线音源请求超时，请稍后重试";
+            if (message.Contains("所有后端均失败") || message.IndexOf("all backends failed", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "当前音源的所有后端均不可用，请检查网络、代理或更新音源";
             var trimmed = System.Text.RegularExpressions.Regex.Replace(message, "https?://\\S+", "远程请求");
             trimmed = trimmed.Replace("\r", " ").Replace("\n", " ").Trim();
             var cut = trimmed.IndexOf('{');

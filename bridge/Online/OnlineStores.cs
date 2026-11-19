@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -30,8 +31,12 @@ namespace LxMusic.Bridge.Online
             if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
             var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllBytes(temp, payload);
-            if (File.Exists(path)) File.Delete(path);
-            File.Move(temp, path);
+            try
+            {
+                if (File.Exists(path)) File.Replace(temp, path, null);
+                else File.Move(temp, path);
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
         }
 
         public static string ReadAllText(string path)
@@ -69,7 +74,8 @@ namespace LxMusic.Bridge.Online
     {
         private readonly object _sync = new object();
         private readonly string _filePath = AppPaths.File("online-source.json");
-        private StoredOnlineSource _stored;
+        private List<StoredOnlineSource> _sources = new List<StoredOnlineSource>();
+        private string _activeId;
         private bool _loaded;
 
         public OnlineSourceState State
@@ -80,16 +86,7 @@ namespace LxMusic.Bridge.Online
                 {
                     var stored = Load();
                     if (stored == null) return new OnlineSourceState();
-                    return new OnlineSourceState
-                    {
-                        Name = string.IsNullOrWhiteSpace(stored.DisplayName)
-                            ? (string.IsNullOrWhiteSpace(stored.Descriptor?.Name) ? "已导入在线音源" : stored.Descriptor.Name)
-                            : stored.DisplayName,
-                        Version = stored.Descriptor?.Version ?? string.Empty,
-                        Host = SafeHost(stored.Url),
-                        Imported = true,
-                        Descriptor = stored.Descriptor ?? new LxSourceDescriptor()
-                    };
+                    return Describe(stored);
                 }
             }
         }
@@ -99,43 +96,143 @@ namespace LxMusic.Bridge.Online
             get { lock (_sync) { return Load(); } }
         }
 
-        public void Save(string url, string script, LxSourceDescriptor descriptor, string displayName)
+        public IReadOnlyList<OnlineSourceState> List()
         {
-            lock (_sync)
+            lock (_sync) { Load(); return _sources.Select(Describe).ToArray(); }
+        }
+
+        private static OnlineSourceState Describe(StoredOnlineSource stored) => new OnlineSourceState
+        {
+            Id = stored.Id,
+            Name = string.IsNullOrWhiteSpace(stored.DisplayName)
+                ? (string.IsNullOrWhiteSpace(stored.Descriptor?.Name) ? "已导入在线音源" : stored.Descriptor.Name)
+                : stored.DisplayName,
+            Version = stored.Descriptor?.Version ?? string.Empty,
+            Host = SafeHost(stored.Url), Imported = true,
+            Descriptor = stored.Descriptor ?? new LxSourceDescriptor()
+        };
+
+        public void Save(string url, string script, LxSourceDescriptor descriptor, string displayName, string origin = null)
+        {
+            Mutate(() =>
             {
-                _stored = new StoredOnlineSource
+                var old = _sources.FirstOrDefault(item => item.Script == script ||
+                    (!string.IsNullOrEmpty(url) && item.Url == url) ||
+                    (!string.IsNullOrEmpty(origin) && string.Equals(item.Origin, origin, StringComparison.OrdinalIgnoreCase)));
+                var stored = new StoredOnlineSource
                 {
+                    Id = old?.Id ?? Guid.NewGuid().ToString("N"),
+                    Origin = origin ?? string.Empty,
                     Url = url ?? string.Empty,
                     Script = script ?? string.Empty,
                     Descriptor = descriptor ?? new LxSourceDescriptor(),
                     DisplayName = (displayName ?? string.Empty).Trim()
                 };
-                if (_stored.DisplayName.Length > 80) _stored.DisplayName = _stored.DisplayName.Substring(0, 80);
-                _loaded = true;
-                ProtectedFile.WriteAllText(_filePath, JsonConvert.SerializeObject(_stored, Formatting.Indented));
-            }
+                if (stored.DisplayName.Length > 80) stored.DisplayName = stored.DisplayName.Substring(0, 80);
+                if (old == null) _sources.Add(stored);
+                else _sources[_sources.IndexOf(old)] = stored;
+                _activeId = stored.Id;
+            });
         }
 
-        public void Remove()
+        public void Select(string id)
+        {
+            Mutate(() =>
+            {
+                if (!_sources.Any(item => item.Id == id)) throw new InvalidOperationException("音源不存在，请重新打开音源列表");
+                _activeId = id;
+            });
+        }
+
+        // Pin a playback/search operation to its selected source without
+        // changing the active choice for other bridge processes.
+        public void Use(string id)
         {
             lock (_sync)
             {
-                _stored = null;
-                _loaded = true;
-                try { if (File.Exists(_filePath)) File.Delete(_filePath); } catch { }
+                Load();
+                if (!_sources.Any(item => item.Id == id)) throw new InvalidOperationException("所选音源已删除，请重新选择音源");
+                _activeId = id;
+            }
+        }
+
+        public void Remove(string id = null)
+        {
+            Mutate(() =>
+            {
+                var target = id ?? _activeId;
+                if (!_sources.Any(item => item.Id == target)) throw new InvalidOperationException("音源不存在，请刷新音源列表");
+                _sources.RemoveAll(item => item.Id == target);
+                if (!_sources.Any(item => item.Id == _activeId)) _activeId = _sources.FirstOrDefault()?.Id ?? string.Empty;
+            });
+        }
+
+        private void Mutate(Action action)
+        {
+            lock (_sync)
+            using (var mutex = new Mutex(false, "Local\\FooLxMusicSources-" + TextUtil.Md5Hex(_filePath.ToLowerInvariant())))
+            {
+                bool acquired;
+                try { acquired = mutex.WaitOne(TimeSpan.FromSeconds(10)); }
+                catch (AbandonedMutexException) { acquired = true; }
+                if (!acquired) throw new IOException("音源库正忙，请稍后重试");
+                try
+                {
+                    _loaded = false;
+                    Load();
+                    action();
+                    // Keep the active source in the legacy fields so older
+                    // component versions can still read the current source.
+                    var active = _sources.FirstOrDefault(item => item.Id == _activeId);
+                    var root = JObject.FromObject(active ?? new StoredOnlineSource());
+                    root["libraryVersion"] = 1;
+                    root["activeId"] = _activeId;
+                    root["sources"] = JArray.FromObject(_sources);
+                    ProtectedFile.WriteAllText(_filePath, root.ToString(Formatting.None));
+                }
+                finally { _loaded = false; mutex.ReleaseMutex(); }
             }
         }
 
         private StoredOnlineSource Load()
         {
-            if (_loaded) return _stored;
-            _loaded = true;
-            var text = ProtectedFile.ReadAllText(_filePath);
-            if (string.IsNullOrWhiteSpace(text)) return null;
-            try { _stored = JsonConvert.DeserializeObject<StoredOnlineSource>(text); }
-            catch { _stored = null; }
-            if (_stored != null && string.IsNullOrWhiteSpace(_stored.Script)) _stored = null;
-            return _stored;
+            if (!_loaded)
+            {
+                _sources = new List<StoredOnlineSource>();
+                _activeId = string.Empty;
+                if (File.Exists(_filePath))
+                {
+                    var text = ProtectedFile.ReadAllText(_filePath);
+                    if (string.IsNullOrWhiteSpace(text)) throw new IOException("无法读取音源库，原文件未修改");
+                    try
+                    {
+                        var root = JObject.Parse(text);
+                        if (root["libraryVersion"] != null)
+                        {
+                            if (root.Value<int>("libraryVersion") != 1 || !(root["sources"] is JArray))
+                                throw new FormatException("unsupported library");
+                            _sources = root["sources"].ToObject<List<StoredOnlineSource>>();
+                            _activeId = root.Value<string>("activeId");
+                            if (_sources.Any(item => item == null || string.IsNullOrWhiteSpace(item.Script) ||
+                                !Guid.TryParseExact(item.Id, "N", out _))) throw new FormatException("invalid source");
+                            if (_sources.Select(item => item.Id).Distinct().Count() != _sources.Count) throw new FormatException("duplicate IDs");
+                        }
+                        else
+                        {
+                            var legacy = root.ToObject<StoredOnlineSource>();
+                            if (string.IsNullOrWhiteSpace(legacy.Script)) throw new FormatException("empty source");
+                            // Stable until the first save, even across processes.
+                            legacy.Id = TextUtil.Md5Hex(legacy.Script);
+                            _sources.Add(legacy);
+                            _activeId = legacy.Id;
+                        }
+                        if (!_sources.Any(item => item.Id == _activeId)) _activeId = _sources.FirstOrDefault()?.Id ?? string.Empty;
+                    }
+                    catch (Exception ex) { throw new IOException("音源库格式损坏，原文件未修改", ex); }
+                }
+                _loaded = true;
+            }
+            return _sources.FirstOrDefault(item => item.Id == _activeId);
         }
 
         private static string SafeHost(string url)

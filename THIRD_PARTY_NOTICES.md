@@ -13,11 +13,14 @@ The root MIT license does not relicense the bridge or third-party dependencies.
 | --- | --- | --- |
 | Managed online music code | GPL-3.0-or-later, using the later-version option of GPL-2.0-or-later. Original authors retain their rights. | `licenses/GPL-2.0-or-later.txt`, `bridge/LICENSE` |
 | `bridge/Resources/user-api-preload.js` | Derived from `lyswhut/lx-music-mobile` v1.8.4, Apache-2.0. Modified for source IDs, source-provided search, native secure random bytes and binary HTTP responses. | `licenses/LX-Music-Mobile-Apache-2.0.txt` |
+| Kuwo and Migu catalog adapters | Catalog request and metadata conventions adapted from `lyswhut/lx-music-desktop`, Apache-2.0. | `licenses/LX-Music-Mobile-Apache-2.0.txt` |
 | foobar2000 SDK 2025-03-07 | Copyright (c) 2002–2025 Peter Pawlowski. SDK-specific permissive license. SDK sources are obtained separately for building. | `licenses/foobar2000-SDK.txt` |
 | pfc and libPPUI | Copyright (c) 2002–2024 Peter Pawlowski. zlib-style licenses. | `licenses/pfc-zlib.txt`, `licenses/libPPUI-zlib.txt` |
 | Windows Template Library 9.10 | Copyright Microsoft Corporation and the WTL Team. Microsoft Public License. Headers are obtained separately for building. | `licenses/WTL-MS-PL.txt` |
 
 Upstream LX Music source: https://github.com/lyswhut/lx-music-mobile/tree/v1.8.4
+
+Desktop script API and catalog references: https://lxmusic.toside.cn/desktop/custom-source and https://github.com/lyswhut/lx-music-desktop/tree/master/src/renderer/utils/musicSdk
 
 ## Managed runtime dependencies
 

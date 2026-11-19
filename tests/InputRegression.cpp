@@ -135,6 +135,7 @@ int test_quality_and_info() {
         require(!input.decode_run(chunk, abort), "fallback fixture did not end");
         require(test_host::requested_qualities == std::vector<std::string>({ "flac", "320k" }), "fallback skipped or repeated a quality");
         require(test_host::exclusions == std::vector<std::string>({ "", "flac" }), "failed quality was not excluded");
+        require(test_host::pinned_sources == std::vector<std::string>({ "", "1234567890abcdef1234567890abcdef" }), "fallback did not stay with the original source");
         require(test_host::requested_payloads == std::vector<std::string>({ "fixture", "fixture" }), "fallback changed song");
         require(test_host::callbacks.empty() && test_host::stops == 0, "successful fallback interrupted playback");
         if (std::string(stage) == "seek")

@@ -94,6 +94,7 @@ inline std::string stream_bytes, stream_mime, decoder_mime, decoder_prefix;
 inline bool stream_seekable = true;
 inline size_t stream_read_limit = SIZE_MAX;
 inline std::vector<std::string> quality_sequence, requested_payloads, exclusions, requested_qualities;
+inline std::vector<std::string> pinned_sources;
 inline std::string current_quality, media_error, error_stage;
 inline bool duplicate_url = false, repeat_quality = false, dynamic_bitrate = false, no_seek = false, invalid_media = false;
 inline int source_attempts = 0, media_opens = 0, abort_on_open = 0, run_chunks = 0;
@@ -113,6 +114,7 @@ inline void reset(failure mode) {
     stream_bytes = "fLaC_fixture_audio_payload"; stream_mime = "audio/x-ogg";
     decoder_mime.clear(); decoder_prefix.clear(); stream_seekable = true; stream_read_limit = SIZE_MAX;
     quality_sequence.clear(); requested_payloads.clear(); exclusions.clear(); requested_qualities.clear();
+    pinned_sources.clear();
     current_quality.clear(); media_error.clear(); error_stage.clear();
     duplicate_url = repeat_quality = dynamic_bitrate = no_seek = invalid_media = false;
     source_attempts = media_opens = abort_on_open = run_chunks = source_fail_at = 0;
@@ -227,6 +229,8 @@ inline BridgeResult run_bridge(const std::vector<std::string>& args, abort_callb
     test_host::check_failure(test_host::failure::resolve);
     if (test_host::fail == test_host::failure::empty_url) return {};
     if (!test_host::quality_sequence.empty()) {
+        test_host::pinned_sources.push_back(args.size() > 4 ? args[4] : "");
+        if (on_line) on_line({{"SOURCEID", "1234567890abcdef1234567890abcdef"}});
         test_host::requested_payloads.push_back(args.at(1));
         test_host::exclusions.push_back(args.size() > 3 ? args[3] : "");
         const auto index = test_host::repeat_quality ? 0 : test_host::source_attempts;

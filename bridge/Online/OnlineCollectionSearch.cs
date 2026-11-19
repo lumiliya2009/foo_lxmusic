@@ -34,7 +34,8 @@ namespace LxMusic.Bridge.Online
             if (clean.Length == 0) throw new InvalidOperationException("请输入搜索内容");
             if (ReferenceEquals(platform, OnlinePlatform.Qq)) return SearchQq(type, clean, page, limit);
             if (ReferenceEquals(platform, OnlinePlatform.Netease)) return SearchNetease(type, clean, page, limit);
-            return SearchKugou(type, clean, page, limit);
+            if (platform == OnlinePlatform.Kugou) return SearchKugou(type, clean, page, limit);
+            throw new InvalidOperationException("该站点目前支持单曲搜索");
         }
 
         private static OnlineCollectionPage SearchQq(OnlineSearchType type, string query, int page, int limit)
@@ -203,7 +204,8 @@ namespace LxMusic.Bridge.Online
             if (collection == null) throw new ArgumentNullException(nameof(collection));
             if (ReferenceEquals(collection.Platform, OnlinePlatform.Qq)) return QqAlbumTracks(collection, page);
             if (ReferenceEquals(collection.Platform, OnlinePlatform.Netease)) return NeteaseAlbumTracks(collection, page);
-            return KugouAlbumTracks(collection, page);
+            if (collection.Platform == OnlinePlatform.Kugou) return KugouAlbumTracks(collection, page);
+            throw new InvalidOperationException("该站点暂不支持专辑展开");
         }
 
         private static OnlineSearchPage QqAlbumTracks(OnlineCollection collection, int page)

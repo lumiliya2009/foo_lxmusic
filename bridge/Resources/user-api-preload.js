@@ -23,6 +23,10 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     '__lx_native_call__utils_aes_encrypt',
     '__lx_native_call__utils_rsa_encrypt',
     '__lx_native_call__utils_random_bytes',
+    '__lx_native_call__utils_bytes2b64',
+    '__lx_native_call__utils_bytes2utf8',
+    '__lx_native_call__utils_inflate',
+    '__lx_native_call__utils_deflate',
   ]
   const nativeFuncs = {}
   for (const name of nativeFuncNames) {
@@ -213,7 +217,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     // console.log(data)
     if (!events.request) return nativeCall(NATIVE_EVENTS_NAMES.response, { requestKey, status: false, errorMessage: 'Request event is not defined' })
     try {
-      events.request.call(globalThis.lx, { source: data.source, action: data.action, info: data.info }).then(response => {
+      Promise.resolve(events.request.call(globalThis.lx, { source: data.source, action: data.action, info: data.info })).then(response => {
         let result
         switch (data.action) {
           case 'musicUrl':
@@ -328,6 +332,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
           ? userSource.qualitys.filter(quality => typeof quality == 'string' && quality.length <= 32)
           : []
         sourceInfo.sources[source] = {
+          name: typeof userSource.name === 'string' ? userSource.name.substring(0, 80) : source,
           type: 'music',
           actions: Array.from(new Set(actions)).slice(0, 16),
           qualitys: Array.from(new Set(qualitys)).slice(0, 32),
@@ -351,7 +356,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
 
   const dataToB64 = (data) => {
     if (typeof data === 'string') return nativeFuncs.utils_str2b64(data)
-    else if (Array.isArray(data) || ArrayBuffer.isView(data)) return utils.buffer.bufToString(data, 'base64')
+    else if (Array.isArray(data) || ArrayBuffer.isView(data) || data instanceof ArrayBuffer) return utils.buffer.bufToString(utils.buffer.from(data), 'base64')
     throw new Error('data type error: ' + typeof data + ' raw data: ' + data)
   }
   const utils = {
@@ -381,7 +386,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
       },
       md5(str) {
         if (typeof str !== 'string') throw new Error('param required a string')
-        const md5 = nativeFuncs.utils_str2md5(encodeURIComponent(str))
+        const md5 = nativeFuncs.utils_str2md5(str)
         // console.log('md5', str, md5)
         return md5
       },
@@ -392,15 +397,17 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
         if (typeof input === 'string') {
           switch (encoding) {
             case 'binary':
-              throw new Error('Binary encoding is not supported for input strings')
+              return new Uint8Array(Array.from(input, char => char.charCodeAt(0) & 255))
             case 'base64':
               return new Uint8Array(JSON.parse(nativeFuncs.utils_b642buf(input)))
             case 'hex':
-              return new Uint8Array(input.match(/.{1,2}/g).map(byte => parseInt(byte, 16)))
+              return new Uint8Array((input.match(/[0-9a-f]{2}/gi) || []).map(byte => parseInt(byte, 16)))
             default:
-              return new Uint8Array(stringToBytes(input))
+              return new Uint8Array(JSON.parse(nativeFuncs.utils_b642buf(nativeFuncs.utils_str2b64(input))))
           }
-        } else if (Array.isArray(input)) {
+        } else if (ArrayBuffer.isView(input)) {
+          return new Uint8Array(new Uint8Array(input.buffer, input.byteOffset, input.byteLength))
+        } else if (Array.isArray(input) || input instanceof ArrayBuffer) {
           return new Uint8Array(input)
         } else {
           throw new Error('Unsupported input type: ' + input + ' encoding: ' + encoding)
@@ -412,39 +419,29 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
           switch (format) {
             case 'binary':
               // return new TextDecoder('latin1').decode(new Uint8Array(buf))
-              return buf
+              return Array.from(buf, byte => String.fromCharCode(byte)).join('')
             case 'hex':
               return new Uint8Array(buf).reduce((str, byte) => str + byte.toString(16).padStart(2, '0'), '')
             case 'base64':
-              return nativeFuncs.utils_str2b64(bytesToString(Array.from(buf)))
+              return nativeFuncs.utils_bytes2b64(JSON.stringify(Array.from(buf)))
             case 'utf8':
             case 'utf-8':
             default:
-              return bytesToString(Array.from(buf))
+              return nativeFuncs.utils_bytes2utf8(JSON.stringify(Array.from(buf)))
           }
         } else {
           throw new Error('Input is not a valid buffer: ' + buf + ' format: ' + format)
         }
       },
     },
-    // zlib: {
-    //   inflate(buf) {
-    //     return new Promise((resolve, reject) => {
-    //       zlib.inflate(buf, (err, data) => {
-    //         if (err) reject(new Error(err.message))
-    //         else resolve(data)
-    //       })
-    //     })
-    //   },
-    //   deflate(data) {
-    //     return new Promise((resolve, reject) => {
-    //       zlib.deflate(data, (err, buf) => {
-    //         if (err) reject(new Error(err.message))
-    //         else resolve(buf)
-    //       })
-    //     })
-    //   },
-    // }),
+    zlib: {
+      inflate(buf) {
+        return Promise.resolve().then(() => utils.buffer.from(nativeFuncs.utils_inflate(dataToB64(buf)), 'base64'))
+      },
+      deflate(buf) {
+        return Promise.resolve().then(() => utils.buffer.from(nativeFuncs.utils_deflate(dataToB64(buf)), 'base64'))
+      },
+    },
   }
 
   globalThis.lx = {
@@ -525,7 +522,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
       rawScript,
     },
     version: '2.0.0',
-    env: 'mobile',
+    env: 'desktop',
   }
 
   globalThis.setTimeout = _setTimeout

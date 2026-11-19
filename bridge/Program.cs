@@ -30,9 +30,12 @@ namespace LxMusic.Bridge.Online
                     switch (command)
                     {
                         case "status": Status(store); break;
+                        case "source-options": SourceOptions(store); break;
+                        case "select-source": store.Select(args.Length > 2 ? args[2] : string.Empty); Status(store); break;
+                        case "check-update": CheckUpdate(args); break;
                         case "import-file": ImportFile(repository.Value, ArgText(args, 2)); break;
                         case "import-url": ImportUrl(repository.Value, ArgText(args, 2)); break;
-                        case "remove-source": repository.Value.ResetSource(); Ok("已删除导入的音源"); break;
+                        case "remove-source": repository.Value.ResetSource(args.Length > 2 ? args[2] : null); Ok("已删除音源"); break;
                         case "search": Search(repository.Value, args); break;
                         case "expand": Expand(repository.Value, args); break;
                         case "resolve": Resolve(repository.Value, args); break;
@@ -61,6 +64,36 @@ namespace LxMusic.Bridge.Online
             var sites = string.Join("、", state.Descriptor.Sources.Keys.Select(PlatformLabel));
             Ok(state.Name + (string.IsNullOrWhiteSpace(state.Version) ? "" : " " + state.Version) +
                (sites.Length == 0 ? "" : "（" + sites + "）"));
+        }
+
+        private static void SourceOptions(OnlineSourceStore store)
+        {
+            var active = store.State.Id;
+            foreach (var source in store.List())
+            {
+                Emit("SOURCE", source.Id, PayloadCodec.EncodeText(source.Name), source.Id == active ? "1" : "0");
+                var seen = new HashSet<string>();
+                foreach (var key in source.Descriptor.Sources.Keys)
+                {
+                    var platform = OnlinePlatform.FromId(key);
+                    if (!seen.Add(platform.Id)) continue;
+                    var label = platform.Label;
+                    if (label == platform.Id && source.Descriptor.Names.TryGetValue(key, out var sourceName) && !string.IsNullOrWhiteSpace(sourceName)) label = sourceName;
+                    var searchable = platform.HasBuiltInSearch || source.Descriptor.ActionsFor(platform).Any(action =>
+                        string.Equals(action, "search", StringComparison.OrdinalIgnoreCase) || string.Equals(action, "musicSearch", StringComparison.OrdinalIgnoreCase));
+                    if (!searchable) continue;
+                    Emit("SITE", source.Id, platform.Id, PayloadCodec.EncodeText(label),
+                        platform.SupportsCollections ? "track,album,artist,playlist" : "track");
+                }
+            }
+        }
+
+        private static void CheckUpdate(string[] args)
+        {
+            if (args.Length < 3) throw new InvalidOperationException("缺少当前版本号");
+            var update = UpdateChecker.Check(args[2]);
+            if (update == null) Ok("当前已是最新版本（" + args[2] + "）");
+            else Emit("UPDATE", PayloadCodec.EncodeText(update.Url), update.Version);
         }
 
         private static void ImportFile(OnlineMusicRepository repository, string path)
@@ -92,6 +125,15 @@ namespace LxMusic.Bridge.Online
             var page = PositiveInt(args[5], 1);
             var limit = Math.Min(50, PositiveInt(args[6], DefaultLimit));
             var quality = args[7];
+            if (args.Length > 8 && !string.IsNullOrEmpty(args[8]))
+            {
+                repository.Sources.Select(args[8]);
+                repository.Sources.Use(args[8]);
+            }
+            if (repository.Sources.State.Imported && !repository.Sources.State.Descriptor.Supports(platform))
+                throw new InvalidOperationException("当前音源不支持" + platform.Label);
+            if (type != "track" && !platform.SupportsCollections)
+                throw new InvalidOperationException(platform.Label + "目前支持单曲搜索");
 
             if (type == "track")
             {
@@ -139,6 +181,8 @@ namespace LxMusic.Bridge.Online
             var payload = PayloadCodec.Parse(args[2]);
             if (payload.Kind != "track") throw new InvalidOperationException("请先按回车打开专辑、歌手或歌单，再选择歌曲播放");
             var wanted = OnlineQuality.FromId(args[3]) ?? OnlineQuality.FromId(payload.PreferredQuality) ?? OnlineQuality.High;
+            if (args.Length > 5 && !string.IsNullOrEmpty(args[5])) repository.Sources.Use(args[5]);
+            Emit("SOURCEID", repository.Sources.State.Id);
             var tried = new List<string>(args.Length > 4 ? args[4].Split(',') : Array.Empty<string>());
             var track = payload.ToTrack();
             var media = repository.Resolve(track, wanted, tried, quality =>
@@ -302,16 +346,17 @@ namespace LxMusic.Bridge.Online
                 case "wy": case "netease": return "网易云音乐";
                 case "kw": case "kuwo": return "酷我音乐";
                 case "mg": case "migu": return "咪咕音乐";
+                case "qs": case "qishui": return "汽水音乐";
                 default: return id ?? string.Empty;
             }
         }
 
         private static string UserMessage(Exception error)
         {
-            var messages = new List<string>();
-            for (var current = error; current != null; current = current.InnerException)
-                if (!string.IsNullOrWhiteSpace(current.Message) && !messages.Contains(current.Message)) messages.Add(current.Message.Trim());
-            var text = string.Join("；", messages);
+            while (error is AggregateException aggregate && aggregate.InnerExceptions.Count == 1) error = aggregate.InnerExceptions[0];
+            // Repository errors already contain a readable summary. Appending
+            // their inner exception repeats it and can expose source URL tokens.
+            var text = System.Text.RegularExpressions.Regex.Replace(error.Message ?? string.Empty, "https?://\\S+", "远程请求").Trim();
             return string.IsNullOrWhiteSpace(text) ? "未知错误" : text;
         }
 

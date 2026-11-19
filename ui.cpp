@@ -9,6 +9,7 @@ cfg_int g_search_type({ 0x628a3da2, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x
 cfg_string g_search_keyword({ 0x628a3da3, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 cfg_string g_download_folder({ 0x628a3da4, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 cfg_string g_download_quality({ 0x628a3da5, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "flac");
+cfg_string g_search_site_id({ 0x628a3da6, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 
 std::string dialog_text(HWND dialog, UINT id) {
     pfc::string8 value;
@@ -20,32 +21,82 @@ class search_dialog : public CDialogImpl<search_dialog> {
 public:
     enum { IDD = IDD_LX_SEARCH };
     SearchOptions options;
+    std::vector<SourceOption> sources;
+    std::string preferred_site;
 
     BEGIN_MSG_MAP(search_dialog)
         MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_HANDLER(IDC_LX_SOURCE, CBN_SELCHANGE, OnSourceChanged)
+        COMMAND_HANDLER(IDC_LX_SITE, CBN_SELCHANGE, OnSiteChanged)
         COMMAND_ID_HANDLER(IDOK, OnOK)
         COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
     END_MSG_MAP()
 
     BOOL OnInitDialog(CWindow, LPARAM) {
         CenterWindow(GetParent());
-        auto site = CComboBox(GetDlgItem(IDC_LX_SITE));
-        site.AddString(L"QQ音乐");
-        site.AddString(L"酷狗音乐");
-        site.AddString(L"网易云音乐");
-        site.SetCurSel(std::clamp(static_cast<int>(g_search_site), 0, 2));
-
-        auto type = CComboBox(GetDlgItem(IDC_LX_TYPE));
-        type.AddString(L"单曲");
-        type.AddString(L"专辑");
-        type.AddString(L"歌手");
-        type.AddString(L"歌单");
-        type.SetCurSel(std::clamp(static_cast<int>(g_search_type), 0, 3));
+        auto source = CComboBox(GetDlgItem(IDC_LX_SOURCE));
+        int selected = 0;
+        for (size_t i = 0; i < sources.size(); ++i) {
+            source.AddString(pfc::stringcvt::string_wide_from_utf8(sources[i].name.c_str()));
+            if (sources[i].active) selected = static_cast<int>(i);
+        }
+        source.SetCurSel(selected);
+        FillSites();
 
         uSetDlgItemText(*this, IDC_LX_KEYWORD, g_search_keyword.get().c_str());
         CEdit(GetDlgItem(IDC_LX_KEYWORD)).SetSel(0, -1);
         GetDlgItem(IDC_LX_KEYWORD).SetFocus();
         return FALSE;
+    }
+
+    const SourceOption* SelectedSource() const {
+        const int i = CComboBox(GetDlgItem(IDC_LX_SOURCE)).GetCurSel();
+        return i >= 0 && static_cast<size_t>(i) < sources.size() ? &sources[i] : nullptr;
+    }
+
+    const SourceSite* SelectedSite() const {
+        const auto source = SelectedSource();
+        const int i = CComboBox(GetDlgItem(IDC_LX_SITE)).GetCurSel();
+        return source && i >= 0 && static_cast<size_t>(i) < source->sites.size() ? &source->sites[i] : nullptr;
+    }
+
+    void FillSites() {
+        auto site = CComboBox(GetDlgItem(IDC_LX_SITE));
+        std::string preferred = preferred_site.empty() ? g_search_site_id.get().c_str() : preferred_site;
+        if (preferred.empty()) {
+            static const char* legacy[] = { "qq", "kugou", "netease" };
+            preferred = legacy[std::clamp(static_cast<int>(g_search_site), 0, 2)];
+        }
+        site.ResetContent();
+        int selected = 0;
+        if (const auto source = SelectedSource()) {
+            for (size_t i = 0; i < source->sites.size(); ++i) {
+                site.AddString(pfc::stringcvt::string_wide_from_utf8(source->sites[i].label.c_str()));
+                if (source->sites[i].id == preferred) selected = static_cast<int>(i);
+            }
+        }
+        site.SetCurSel(selected);
+        FillTypes();
+    }
+
+    void FillTypes() {
+        auto type = CComboBox(GetDlgItem(IDC_LX_TYPE));
+        type.ResetContent();
+        const auto site = SelectedSite();
+        type.AddString(L"单曲");
+        if (site && site->collections) {
+            type.AddString(L"专辑"); type.AddString(L"歌手"); type.AddString(L"歌单");
+        }
+        type.SetCurSel(site && site->collections ? std::clamp(static_cast<int>(g_search_type), 0, 3) : 0);
+        GetDlgItem(IDOK).EnableWindow(site != nullptr && site->searchable);
+        uSetDlgItemText(*this, IDC_LX_STATUS, !site ? "当前音源没有可搜索的站点。" :
+            !site->searchable ? "音源支持此站点的播放解析，但未提供搜索接口。" :
+            site->collections ? "结果中按回车或双击：打开集合，播放歌曲。" : "此站点支持单曲搜索，结果中按回车播放。" );
+    }
+    LRESULT OnSourceChanged(WORD, WORD, HWND, BOOL&) { FillSites(); return 0; }
+    LRESULT OnSiteChanged(WORD, WORD, HWND, BOOL&) {
+        if (const auto site = SelectedSite()) preferred_site = site->id;
+        FillTypes(); return 0;
     }
 
     LRESULT OnOK(WORD, WORD, HWND, BOOL&) {
@@ -58,14 +109,16 @@ public:
             GetDlgItem(IDC_LX_KEYWORD).SetFocus();
             return 0;
         }
-        static const char* sites[] = { "qq", "kugou", "netease" };
         static const char* types[] = { "track", "album", "artist", "playlist" };
-        const int site = std::clamp(CComboBox(GetDlgItem(IDC_LX_SITE)).GetCurSel(), 0, 2);
+        const auto source = SelectedSource();
+        const auto site = SelectedSite();
+        if (!source || !site || !site->searchable) return 0;
         const int type = std::clamp(CComboBox(GetDlgItem(IDC_LX_TYPE)).GetCurSel(), 0, 3);
-        options.site = sites[site];
+        options.source = source->id;
+        options.site = site->id;
         options.type = types[type];
         options.quality = "flac";
-        g_search_site = site;
+        g_search_site_id = options.site.c_str();
         g_search_type = type;
         g_search_keyword = options.keyword.c_str();
         EndDialog(IDOK);
@@ -73,6 +126,47 @@ public:
     }
 
     LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
+};
+
+class source_manager_dialog : public CDialogImpl<source_manager_dialog> {
+public:
+    enum { IDD = IDD_LX_SOURCES };
+    std::vector<SourceOption> sources;
+    std::string selected;
+    SourceAction action = SourceAction::close;
+    BEGIN_MSG_MAP(source_manager_dialog)
+        MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_ID_HANDLER(IDC_LX_IMPORT_FILE, OnAction)
+        COMMAND_ID_HANDLER(IDC_LX_IMPORT_URL, OnAction)
+        COMMAND_ID_HANDLER(IDC_LX_REMOVE_SOURCE, OnAction)
+        COMMAND_ID_HANDLER(IDC_LX_SELECT_SOURCE, OnAction)
+        COMMAND_ID_HANDLER(IDCANCEL, OnAction)
+    END_MSG_MAP()
+    BOOL OnInitDialog(CWindow, LPARAM) {
+        CenterWindow(GetParent());
+        auto list = CListBox(GetDlgItem(IDC_LX_SOURCE_LIST));
+        int current = 0;
+        for (size_t i = 0; i < sources.size(); ++i) {
+            const auto label = sources[i].name + (sources[i].active ? "（当前）" : "");
+            list.AddString(pfc::stringcvt::string_wide_from_utf8(label.c_str()));
+            if (sources[i].active) current = static_cast<int>(i);
+        }
+        list.SetCurSel(current);
+        GetDlgItem(IDC_LX_REMOVE_SOURCE).EnableWindow(!sources.empty());
+        GetDlgItem(IDC_LX_SELECT_SOURCE).EnableWindow(!sources.empty());
+        return TRUE;
+    }
+    LRESULT OnAction(WORD, WORD id, HWND, BOOL&) {
+        if (id == IDC_LX_IMPORT_FILE) action = SourceAction::import_file;
+        else if (id == IDC_LX_IMPORT_URL) action = SourceAction::import_url;
+        else if (id == IDC_LX_REMOVE_SOURCE || id == IDC_LX_SELECT_SOURCE) {
+            const int i = CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).GetCurSel();
+            if (i < 0 || static_cast<size_t>(i) >= sources.size()) return 0;
+            selected = sources[i].id;
+            action = id == IDC_LX_SELECT_SOURCE ? SourceAction::select : SourceAction::remove;
+        }
+        EndDialog(IDOK); return 0;
+    }
 };
 
 class url_dialog : public CDialogImpl<url_dialog> {
@@ -260,11 +354,20 @@ private:
 
 } // namespace
 
-bool show_search_dialog(SearchOptions& options) {
+bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources) {
     search_dialog dialog;
+    dialog.sources = sources;
     if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
     options = dialog.options;
     return true;
+}
+
+SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected) {
+    source_manager_dialog dialog;
+    dialog.sources = sources;
+    dialog.DoModal(core_api::get_main_window());
+    selected = dialog.selected;
+    return dialog.action;
 }
 
 bool show_url_dialog(std::string& url) {

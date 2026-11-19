@@ -25,8 +25,14 @@ namespace LxMusic.Bridge.Online
         public static readonly OnlinePlatform Qq = new OnlinePlatform("qq", "tx", "QQ音乐", new[] { "tx", "qq", "tencent", "qqmusic" });
         public static readonly OnlinePlatform Kugou = new OnlinePlatform("kugou", "kg", "酷狗音乐", new[] { "kg", "kugou" });
         public static readonly OnlinePlatform Netease = new OnlinePlatform("netease", "wy", "网易云音乐", new[] { "wy", "netease", "163", "neteasecloud" });
+        public static readonly OnlinePlatform Kuwo = new OnlinePlatform("kuwo", "kw", "酷我音乐", new[] { "kw", "kuwo" });
+        public static readonly OnlinePlatform Migu = new OnlinePlatform("migu", "mg", "咪咕音乐", new[] { "mg", "migu" });
+        public static readonly OnlinePlatform Qishui = new OnlinePlatform("qishui", "qs", "汽水音乐", new[] { "qs", "qishui", "soda" });
 
-        public static readonly OnlinePlatform[] All = { Qq, Kugou, Netease };
+        public static readonly OnlinePlatform[] All = { Qq, Kugou, Netease, Kuwo, Migu, Qishui };
+
+        public bool SupportsCollections => this == Qq || this == Kugou || this == Netease;
+        public bool HasBuiltInSearch => SupportsCollections || this == Kuwo || this == Migu;
 
         public bool MatchesSourceId(string sourceId)
         {
@@ -52,7 +58,10 @@ namespace LxMusic.Bridge.Online
             {
                 if (platform.MatchesSourceId(id)) return platform;
             }
-            return Qq;
+            var source = (id ?? string.Empty).Trim().ToLowerInvariant();
+            if (!System.Text.RegularExpressions.Regex.IsMatch(source, "^[a-z0-9_-]{1,32}$"))
+                throw new InvalidOperationException("无效的平台标识");
+            return new OnlinePlatform(source, source, source, new[] { source });
         }
 
         public override string ToString() => Label;
@@ -222,6 +231,7 @@ namespace LxMusic.Bridge.Online
         public string Version { get; set; } = string.Empty;
         public Dictionary<string, List<string>> Sources { get; set; } = new Dictionary<string, List<string>>();
         public Dictionary<string, List<string>> Actions { get; set; } = new Dictionary<string, List<string>>();
+        public Dictionary<string, string> Names { get; set; } = new Dictionary<string, string>();
 
         public List<string> QualitiesFor(OnlinePlatform platform)
         {
@@ -268,6 +278,8 @@ namespace LxMusic.Bridge.Online
 
     public sealed class StoredOnlineSource
     {
+        [JsonProperty("id")] public string Id { get; set; } = string.Empty;
+        [JsonProperty("origin")] public string Origin { get; set; } = string.Empty;
         [JsonProperty("url")] public string Url { get; set; } = string.Empty;
         [JsonProperty("script")] public string Script { get; set; } = string.Empty;
         [JsonProperty("displayName")] public string DisplayName { get; set; } = string.Empty;
@@ -276,6 +288,7 @@ namespace LxMusic.Bridge.Online
 
     public sealed class OnlineSourceState
     {
+        public string Id { get; set; } = string.Empty;
         public string Name { get; set; } = "未导入在线音源";
         public string Version { get; set; } = string.Empty;
         public string Host { get; set; } = string.Empty;
