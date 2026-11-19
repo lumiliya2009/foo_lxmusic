@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <BaseOutputPath>../build/album-regression/</BaseOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+    <ProjectReference Include="../bridge/foo_lx_bridge.csproj" />
+    <Compile Include="AlbumDownloadRegression.cs" />
+    <Compile Include="../bridge/Online/OnlineAlbumDownload.cs" Link="OnlineAlbumDownload.cs" />
+    <Compile Include="../bridge/Online/OnlineHttp.cs" Link="OnlineHttp.cs" />
+    <Compile Include="../bridge/Online/TextUtil.cs" Link="TextUtil.cs" />
+  </ItemGroup>
+</Project>

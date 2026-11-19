@@ -1,0 +1,45 @@
+# Build output and local test hosts
+/build/
+/dist/
+/Release*/
+/Debug*/
+/x64/
+/Win32/
+**/bin/
+**/obj/
+*.fb2k-component
+*.dll
+*.exe
+*.lib
+*.obj
+*.pdb
+*.pch
+*.exp
+*.ilk
+*.tlog
+*.log
+
+# Editor and machine configuration
+.vs/
+.vscode/
+*.user
+*.suo
+*.VC.db
+.env
+.env.*
+/.publish/
+
+# Private runtime data, imported scripts, and downloaded media
+/test-profile/
+**/profile/
+**/lyrics-cache/
+**/online-source.json
+**/online-accounts.json
+**/media-url.txt
+**/payload-*.txt
+*.part
+*.lrc
+*.flac
+*.mp3
+*.m4a
+*.wav
