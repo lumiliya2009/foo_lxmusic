@@ -83,7 +83,14 @@ std::string bridge_message(const BridgeResult& result, const char* record = "OK"
 std::string bridge_error(const BridgeResult& result);
 file::ptr open_audio_stream(const std::string& url, abort_callback& abort);
 
-void add_payloads_to_playlist(const std::vector<std::string>& payloads, const std::string& playlist_name);
+t_size add_payloads_to_playlist(const std::vector<std::string>& payloads, const std::string& playlist_name,
+    t_size preserve_playlist = pfc_infinite);
+struct NavigationOrigin;
+std::shared_ptr<NavigationOrigin> capture_navigation_origin(metadb_handle_list_cref items);
+void add_expanded_payloads(const std::vector<std::string>& payloads, const std::string& playlist_name,
+    const std::shared_ptr<NavigationOrigin>& origin);
+void reset_playlist_navigation(t_size playlist);
+bool command_back();
 metadb_handle_list selected_playlist_items();
 std::string payload_for_handle(metadb_handle_ptr handle);
 std::string lyric_payload_for_handle(metadb_handle_ptr handle);

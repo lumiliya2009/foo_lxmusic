@@ -128,14 +128,12 @@ namespace LxMusic.Bridge.Online
                 using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(buffer);
                 return Convert.ToBase64String(buffer);
             }));
-            engine.SetValue("__hostLog", new Action<string>(message => Log?.Invoke(message)));
-
-            engine.Execute(
-                "var console = { log: function(){ __hostLog(Array.prototype.slice.call(arguments).join(' ')); }," +
-                " info: function(){ __hostLog(Array.prototype.slice.call(arguments).join(' ')); }," +
-                " warn: function(){ __hostLog(Array.prototype.slice.call(arguments).join(' ')); }," +
-                " error: function(){ __hostLog(Array.prototype.slice.call(arguments).join(' ')); }," +
-                " debug: function(){ __hostLog(Array.prototype.slice.call(arguments).join(' ')); } };");
+            engine.SetValue("__hostLog", new Action<string>(message =>
+            {
+                // Diagnostics must not turn a successful source request into a playback failure.
+                try { Log?.Invoke(message); } catch { }
+            }));
+            engine.Execute(ReadResource("LxMusic.Resources.console-preload.js"));
 
             _engine = engine;
         }

@@ -372,7 +372,8 @@ std::string bridge_error(const BridgeResult& result) {
     return raw.empty() ? "LX 音源桥接进程执行失败" : raw;
 }
 
-void add_payloads_to_playlist(const std::vector<std::string>& payloads, const std::string& playlist_name) {
+t_size add_payloads_to_playlist(const std::vector<std::string>& payloads, const std::string& playlist_name,
+    t_size preserve_playlist) {
     if (payloads.empty()) throw std::runtime_error("没有可加入播放列表的结果");
     metadb_handle_list items;
     auto hints = metadb_hint_list_v2::create();
@@ -388,7 +389,10 @@ void add_payloads_to_playlist(const std::vector<std::string>& payloads, const st
     // formatting pass already sees artist/title instead of the encoded URI.
     hints->on_done();
     auto playlists = playlist_manager::get();
-    const auto index = playlists->find_or_create_playlist(playlist_name.c_str());
+    auto index = playlists->find_or_create_playlist(playlist_name.c_str());
+    if (index == preserve_playlist)
+        index = playlists->create_playlist(playlist_name.c_str(), pfc_infinite, pfc_infinite);
+    reset_playlist_navigation(index);
     playlists->playlist_undo_backup(index);
     playlists->playlist_clear(index);
     playlists->playlist_add_items(index, items, pfc::bit_array_one(0));
@@ -396,6 +400,7 @@ void add_payloads_to_playlist(const std::vector<std::string>& payloads, const st
     playlists->set_active_playlist(index);
     playlists->playlist_set_focus_item(index, 0);
     playlists->playlist_ensure_visible(index, 0);
+    return index;
 }
 
 metadb_handle_list selected_playlist_items() {

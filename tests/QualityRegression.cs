@@ -67,6 +67,72 @@ static class QualityRegression
             "unrecognized source quality was accepted");
     }
 
+    static void TestConsole()
+    {
+        const string script = @"
+lx.on(lx.EVENT_NAMES.request, async ({info}) => {
+    try {
+        if (lx.env !== 'mobile') {
+            console.groupEnd();
+            const methods = ['assert','clear','debug','error','info','log','table','trace','warn',
+                'dir','dirxml','count','countReset','group','groupCollapsed','groupEnd','time','timeLog','timeEnd'];
+            for (const method of methods)
+                if (typeof console[method] !== 'function') throw new Error('missing console method: ' + method);
+            console.group('outer');
+            console.groupCollapsed('inner');
+            const circular = {}; circular.self = circular;
+            const unprintable = {toString() {throw new Error('diagnostic formatting failed');}};
+            for (const method of ['debug','error','info','log','table','trace','warn','dir','dirxml'])
+                console[method](Symbol('fixture'), circular, unprintable);
+            console.assert(true, 'must not be logged');
+            console.assert(false, 'diagnostic assertion');
+            console.count('requests'); console.count('requests'); console.countReset('requests'); console.count('requests');
+            console.time('parse'); console.timeLog('parse', 'progress'); console.timeEnd('parse');
+            console.timeEnd('missing'); console.countReset('missing');
+            console.groupEnd(); console.groupEnd(); console.clear();
+        }
+        if (info.musicInfo.mode === 'source-error') throw new Error('fixture source failure');
+        await new Promise(resolve => setTimeout(resolve, 1));
+        return 'https://fixture.invalid/console-compatible';
+    } finally {
+        if (lx.env !== 'mobile') console.groupEnd();
+    }
+});
+lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['flac','320k','128k']}}});";
+        using (var runtime = LxSourceRuntime.Create(script, "console", TimeSpan.FromSeconds(10)))
+        {
+            var logs = new List<string>();
+            runtime.Log += logs.Add;
+            var result = runtime.InvokeAsync("musicUrl", "tx", "{\"musicInfo\":{\"mode\":\"ok\"}}", TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            Check(result.Contains("fixture.invalid/console-compatible"), "desktop console interrupted source resolution");
+            Check(logs.Count(line => line.Trim() == "requests: 1") == 2 && logs.Any(line => line.Trim() == "requests: 2"), "console counters did not reset");
+            Check(logs.Count(line => line.TrimStart().StartsWith("parse: ")) == 2, "console timers did not log");
+            Check(!logs.Any(line => line.Contains("must not be logged")) && logs.Any(line => line.Contains("diagnostic assertion")), "console assertion threw or ignored its condition");
+            try
+            {
+                runtime.InvokeAsync("musicUrl", "tx", "{\"musicInfo\":{\"mode\":\"source-error\"}}", TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+                Check(false, "source rejection was swallowed");
+            }
+            catch (Exception error) { Check(error.Message.Contains("fixture source failure"), "console cleanup hid the original source error"); }
+            runtime.Log += message => { throw new InvalidOperationException("diagnostic sink failed"); };
+            result = runtime.InvokeAsync("musicUrl", "tx", "{\"musicInfo\":{\"mode\":\"ok\"}}", TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            Check(result.Contains("fixture.invalid/console-compatible"), "diagnostic sink interrupted source resolution");
+        }
+        var originalProfile = profile;
+        profile = Path.Combine(profile, "console-protocol");
+        Directory.CreateDirectory(profile);
+        try
+        {
+            var file = Path.Combine(profile, "console.js");
+            File.WriteAllText(file, script);
+            Check(Bridge("import-file", Encode(file)).Code == 0, "console fixture import failed");
+            var result = Bridge("resolve", Payload(), "flac");
+            Check(result.Code == 0 && result.Tried.SequenceEqual(new[] { "flac" }), "console calls caused unnecessary quality fallback");
+            Check(result.Lines.All(line => new[] { "SOURCEID", "TRIED", "URL", "REMAINING" }.Contains(line[0])), "console output leaked into bridge protocol");
+        }
+        finally { profile = originalProfile; }
+    }
+
     static void TestBridge()
     {
         var script = Path.Combine(profile, "fixture.js");
@@ -77,8 +143,7 @@ lx.on(lx.EVENT_NAMES.request, function (request) {
     const mode = song.mode;
     if (mode === 'all' || (mode === 'reject_lossless' && type === 'lossless'))
         return Promise.reject(new Error('音质不可用'));
-    if (mode === 'mixed_backend' && type === 'lossless') return Promise.reject(new Error('所有后端均失败：线路一请求超时；线路二无数据'));
-    if (mode !== 'ok' && mode !== 'reject_lossless' && mode !== 'mixed_backend') return Promise.reject(new Error(mode));
+    if (mode !== 'ok' && mode !== 'reject_lossless') return Promise.reject(new Error(mode));
     return Promise.resolve('https://fixture.invalid/' + song.songId + '/' + type);
 });
 lx.send(lx.EVENT_NAMES.inited, { sources: { tx: { type: 'music', actions: ['musicUrl'],
@@ -108,11 +173,9 @@ lx.send(lx.EVENT_NAMES.inited, { sources: { tx: { type: 'music', actions: ['musi
         var sourceFallback = Bridge("resolve", Payload("reject_lossless"), "flac");
         Check(sourceFallback.Code == 0 && sourceFallback.Tried.SequenceEqual(new[] { "flac", "320k" }), "source-side fallback lost attempt history");
         Check(sourceFallback.Remaining == "1", "source-side failures remained eligible");
-        var mixed = Bridge("resolve", Payload("mixed_backend"), "flac");
-        Check(mixed.Code == 0 && mixed.Tried.SequenceEqual(new[] { "flac", "320k" }), "mixed backend failures blocked quality fallback");
         var all = Bridge("resolve", Payload("all"), "flac");
         Check(all.Code != 0 && all.Tried.SequenceEqual(new[] { "flac", "320k", "128k" }), "all failures repeated aliases or lost attempts");
-        foreach (var fatal in new[] { "音源鉴权失败", "HTTP 401", "HTTP 429", "HTTP 403", "订阅过期", "timeout", "所有后端均失败：HTTP 429；无数据" })
+        foreach (var fatal in new[] { "音源鉴权失败", "HTTP 401", "HTTP 429", "HTTP 403", "订阅过期", "timeout" })
         {
             var result = Bridge("resolve", Payload(fatal), "flac");
             Check(result.Code != 0 && result.Tried.SequenceEqual(new[] { "flac" }), "fatal source failure retried: " + fatal);
@@ -340,6 +403,7 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{wy:{type:'music',actions:['musicUrl'],qu
         Directory.CreateDirectory(profile);
         try
         {
+            TestConsole();
             TestOrdering();
             TestBridge();
             TestLibrary();

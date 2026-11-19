@@ -1,7 +1,39 @@
 #include "stdafx.h"
 
 namespace lxmusic {
+
+struct NavigationOrigin {
+    playlist_position_reference_tracker position;
+    metadb_handle_list selected;
+};
+
 namespace {
+
+struct navigation_link {
+    playlist_position_reference_tracker child{ false };
+    std::shared_ptr<NavigationOrigin> origin;
+};
+std::vector<std::unique_ptr<navigation_link>> g_navigation;
+
+class navigation_keys : public message_filter_impl_base {
+public:
+    bool pretranslate_message(MSG* message) override {
+        if (message->message != WM_KEYDOWN || message->wParam != VK_BACK ||
+            (message->lParam & (1LL << 30)) != 0) return false;
+        for (const auto key : { VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN })
+            if (GetKeyState(key) & 0x8000) return false;
+        const auto focus = GetFocus();
+        if (!focus || GetAncestor(focus, GA_ROOT) != core_api::get_main_window()) return false;
+        wchar_t class_name[128]{};
+        GetClassNameW(focus, class_name, 128);
+        if (_wcsicmp(class_name, L"Edit") == 0 || _wcsnicmp(class_name, L"RichEdit", 8) == 0 ||
+            _wcsnicmp(class_name, L"ComboBox", 8) == 0) return false;
+        const auto type = ui_selection_manager::get()->get_selection_type();
+        if (type != contextmenu_item::caller_active_playlist_selection &&
+            type != contextmenu_item::caller_active_playlist) return false;
+        try { return command_back(); } catch (...) { return false; }
+    }
+};
 
 bool is_collection(metadb_handle_ptr item) {
     try {
@@ -78,14 +110,97 @@ public:
 
 class collection_actions_init : public initquit {
 public:
-    void on_init() override { m_callback = std::make_unique<collection_playlist_callback>(); }
-    void on_quit() override { m_callback.reset(); }
+    void on_init() override {
+        m_callback = std::make_unique<collection_playlist_callback>();
+        m_keys = std::make_unique<navigation_keys>();
+    }
+    void on_quit() override { m_keys.reset(); g_navigation.clear(); m_callback.reset(); }
 private:
     std::unique_ptr<collection_playlist_callback> m_callback;
+    std::unique_ptr<navigation_keys> m_keys;
 };
 static initquit_factory_t<collection_actions_init> g_collection_actions_init;
 
 } // namespace
+
+std::shared_ptr<NavigationOrigin> capture_navigation_origin(metadb_handle_list_cref items) {
+    auto playlists = playlist_manager::get();
+    const auto active = playlists->get_active_playlist();
+    if (active == pfc_infinite || items.get_count() == 0) return {};
+    auto focus = playlists->playlist_get_focus_item(active);
+    metadb_handle_ptr item;
+    if (!playlists->playlist_get_item_handle(item, active, focus) || items.find_item(item) == pfc_infinite) {
+        focus = pfc_infinite;
+        for (t_size i = 0; i < playlists->playlist_get_item_count(active); ++i) {
+            if (playlists->playlist_get_item_handle(item, active, i) && items.find_item(item) != pfc_infinite) {
+                focus = i; break;
+            }
+        }
+        if (focus == pfc_infinite) return {};
+    }
+    auto origin = std::make_shared<NavigationOrigin>();
+    origin->position.m_playlist = active;
+    origin->position.m_item = focus;
+    playlists->playlist_get_selected_items(active, origin->selected);
+    return origin;
+}
+
+void reset_playlist_navigation(t_size playlist) {
+    g_navigation.erase(std::remove_if(g_navigation.begin(), g_navigation.end(), [playlist](const auto& link) {
+        return link->child.m_playlist == playlist || link->child.m_playlist == pfc_infinite ||
+            link->origin->position.m_playlist == pfc_infinite;
+    }), g_navigation.end());
+}
+
+void add_expanded_payloads(const std::vector<std::string>& payloads, const std::string& playlist_name,
+    const std::shared_ptr<NavigationOrigin>& origin) {
+    auto playlists = playlist_manager::get();
+    auto preserve = origin ? origin->position.m_playlist : pfc_infinite;
+    const auto destination = playlists->find_playlist(playlist_name.c_str());
+    // Reusing an ancestor's name must not overwrite its results or create a back-navigation cycle.
+    auto ancestor = preserve;
+    for (size_t step = 0; ancestor != pfc_infinite && step <= g_navigation.size(); ++step) {
+        if (ancestor == destination) { preserve = destination; break; }
+        const auto link = std::find_if(g_navigation.begin(), g_navigation.end(), [ancestor](const auto& item) {
+            return item->child.m_playlist == ancestor;
+        });
+        if (link == g_navigation.end()) break;
+        ancestor = (*link)->origin->position.m_playlist;
+    }
+    const auto child = add_payloads_to_playlist(payloads, playlist_name, preserve);
+    if (!origin || origin->position.m_playlist == pfc_infinite || child == origin->position.m_playlist) return;
+    auto link = std::make_unique<navigation_link>();
+    link->child.m_playlist = child;
+    link->origin = origin;
+    g_navigation.push_back(std::move(link));
+}
+
+bool command_back() {
+    auto playlists = playlist_manager::get();
+    const auto active = playlists->get_active_playlist();
+    const auto link = std::find_if(g_navigation.begin(), g_navigation.end(), [active](const auto& item) {
+        return active != pfc_infinite && item->child.m_playlist == active &&
+            item->origin->position.m_playlist != pfc_infinite;
+    });
+    if (link == g_navigation.end()) return false;
+    const auto origin = (*link)->origin;
+    const auto parent = origin->position.m_playlist;
+    const auto count = playlists->playlist_get_item_count(parent);
+    pfc::bit_array_bittable selected(count);
+    for (t_size i = 0; i < count; ++i) {
+        metadb_handle_ptr item;
+        if (playlists->playlist_get_item_handle(item, parent, i) && origin->selected.find_item(item) != pfc_infinite)
+            selected.set(i, true);
+    }
+    playlists->set_active_playlist(parent);
+    playlists->playlist_set_selection(parent, pfc::bit_array_true(), selected);
+    const auto focus = origin->position.m_item;
+    if (focus < count) {
+        playlists->playlist_set_focus_item(parent, focus);
+        playlists->playlist_ensure_visible(parent, focus);
+    }
+    return true;
+}
 
 void install_collection_actions(t_size playlist) {
     auto playlists = playlist_manager::get();
