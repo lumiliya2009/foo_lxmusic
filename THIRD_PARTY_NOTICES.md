@@ -11,8 +11,8 @@ The root MIT license does not relicense the bridge or third-party dependencies.
 
 | Component | Origin and license | License copy |
 | --- | --- | --- |
-| Managed online music code | Adapted from TzPlayer's Windows implementation; its project README declares GPL-2.0-or-later. This bridge uses the later GPL version 3 or later. Original authors retain their rights. | `licenses/TzPlayer-GPL-2.0-or-later.txt`, `bridge/LICENSE` |
-| `bridge/Resources/user-api-preload.js` | Derived from `lyswhut/lx-music-mobile` v1.8.4, Apache-2.0. Modified by TzPlayer for source IDs, source-provided search, native secure random bytes and binary HTTP responses; reused by this bridge. | `licenses/LX-Music-Mobile-Apache-2.0.txt` |
+| Managed online music code | GPL-3.0-or-later, using the later-version option of GPL-2.0-or-later. Original authors retain their rights. | `licenses/GPL-2.0-or-later.txt`, `bridge/LICENSE` |
+| `bridge/Resources/user-api-preload.js` | Derived from `lyswhut/lx-music-mobile` v1.8.4, Apache-2.0. Modified for source IDs, source-provided search, native secure random bytes and binary HTTP responses. | `licenses/LX-Music-Mobile-Apache-2.0.txt` |
 | foobar2000 SDK 2025-03-07 | Copyright (c) 2002–2025 Peter Pawlowski. SDK-specific permissive license. SDK sources are obtained separately for building. | `licenses/foobar2000-SDK.txt` |
 | pfc and libPPUI | Copyright (c) 2002–2024 Peter Pawlowski. zlib-style licenses. | `licenses/pfc-zlib.txt`, `licenses/libPPUI-zlib.txt` |
 | Windows Template Library 9.10 | Copyright Microsoft Corporation and the WTL Team. Microsoft Public License. Headers are obtained separately for building. | `licenses/WTL-MS-PL.txt` |

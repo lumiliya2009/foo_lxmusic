@@ -8,7 +8,7 @@ using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     internal static class Program
     {
@@ -137,11 +137,18 @@ namespace TzPlayer.Win.Online
         {
             if (args.Length < 4) throw new InvalidOperationException("解析参数不完整");
             var payload = PayloadCodec.Parse(args[2]);
-            if (payload.Kind != "track") throw new InvalidOperationException("集合项目不能直接播放，请先右键展开");
+            if (payload.Kind != "track") throw new InvalidOperationException("请先按回车打开专辑、歌手或歌单，再选择歌曲播放");
             var wanted = OnlineQuality.FromId(args[3]) ?? OnlineQuality.FromId(payload.PreferredQuality) ?? OnlineQuality.High;
-            var media = repository.Resolve(payload.ToTrack(), wanted);
-            Emit("URL", PayloadCodec.EncodeText(media.Url), media.SourceQuality ?? media.Quality?.Id ?? wanted.Id,
+            var tried = new List<string>(args.Length > 4 ? args[4].Split(',') : Array.Empty<string>());
+            var track = payload.ToTrack();
+            var media = repository.Resolve(track, wanted, tried, quality =>
+            {
+                tried.Add(quality);
+                Emit("TRIED", quality);
+            });
+            Emit("URL", PayloadCodec.EncodeText(media.Url), media.Quality?.Id ?? wanted.Id,
                 PayloadCodec.EncodeText(media.MimeType ?? string.Empty));
+            Emit("REMAINING", repository.RemainingQualityTokens(track, wanted, tried).Count.ToString(CultureInfo.InvariantCulture));
         }
 
         private static void Lyrics(string[] args)

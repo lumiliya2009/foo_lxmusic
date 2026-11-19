@@ -8,7 +8,7 @@ using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     // 对照安卓 OnlineLyricsRepository：按标题、歌手、时长匹配，失败来源互不影响。
     internal sealed class LyricsProviderClient

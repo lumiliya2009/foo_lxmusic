@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6
+
+- Show the decoder's actual sample rate, bitrate, channels and codec during playback.
+- Try other available qualities of the same song when its media URL is rejected or invalid, resuming at the current position when possible.
+- Stop with one error after available qualities fail; avoid repeating failed qualities and URLs.
+
 ## 0.1.5
 
 - Download an entire album directly from its context menu, including all catalog pages.

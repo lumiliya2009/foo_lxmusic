@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     /// <summary>在线音乐主仓库：搜索 / 解析播放地址 / 歌单 / 音源导入。</summary>
     public sealed class OnlineMusicRepository
@@ -274,7 +274,8 @@ namespace TzPlayer.Win.Online
             return choices.OrderByDescending(OnlineQuality.RankOf).FirstOrDefault() ?? OnlineQuality.Standard;
         }
 
-        public ResolvedOnlineMedia Resolve(OnlineTrack track, OnlineQuality requested)
+        public List<string> RemainingQualityTokens(OnlineTrack track, OnlineQuality requested,
+            IEnumerable<string> excluded = null)
         {
             if (track == null) throw new ArgumentNullException(nameof(track));
             requested = requested ?? OnlineQuality.Standard;
@@ -283,19 +284,30 @@ namespace TzPlayer.Win.Online
             var sourceId = state.Descriptor.MatchSourceId(track.Platform);
             if (sourceId == null) throw new InvalidOperationException("已导入音源不支持" + track.Platform.Label);
 
-            var runtime = EnsureRuntime();
             var sourceQualities = state.Descriptor.QualitiesFor(track.Platform);
             var trackQualities = track.AvailableQualities ?? new List<OnlineQuality>();
             if ((sourceQualities == null || sourceQualities.Count == 0) && trackQualities.Count > 0)
                 sourceQualities = trackQualities.Select(item => item.Id).ToList();
             var tokens = QualityTokensFor(requested, sourceQualities, trackQualities);
             if (tokens.Count == 0) tokens.Add(requested.Id);
+            var skipped = new HashSet<OnlineQuality>((excluded ?? Enumerable.Empty<string>())
+                .Select(OnlineQuality.FromId).Where(item => item != null));
+            return tokens.Where(token => !skipped.Contains(OnlineQuality.FromId(token))).ToList();
+        }
 
+        public ResolvedOnlineMedia Resolve(OnlineTrack track, OnlineQuality requested,
+            IEnumerable<string> excluded = null, Action<string> onAttempt = null)
+        {
+            var tokens = RemainingQualityTokens(track, requested, excluded);
+            if (tokens.Count == 0) throw new InvalidOperationException("当前歌曲的可用音质均已尝试");
+            var sourceId = Sources.State.Descriptor.MatchSourceId(track.Platform);
+            var runtime = EnsureRuntime();
             Exception lastError = null;
             foreach (var token in tokens)
             {
                 try
                 {
+                    onAttempt?.Invoke((OnlineQuality.FromId(token) ?? requested).Id);
                     var info = new JObject { ["type"] = token, ["musicInfo"] = SafeParse(track.MusicInfoJson) };
                     var raw = runtime.InvokeAsync("musicUrl", sourceId, info.ToString(Formatting.None), TimeSpan.FromSeconds(60))
                         .GetAwaiter().GetResult();
@@ -345,7 +357,8 @@ namespace TzPlayer.Win.Online
                 .OrderBy(pair => OnlineQuality.RankOf(pair.Value) == requestedRank ? 0 : 1)
                 .ThenByDescending(pair => OnlineQuality.RankOf(pair.Value))
                 .ToList();
-            return ordered.Select(pair => pair.Key).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            // Source aliases such as hires/flac24bit are the same quality.
+            return ordered.GroupBy(pair => pair.Value).Select(group => group.First().Key).ToList();
         }
 
         private static bool CanTryAnotherQuality(Exception error)

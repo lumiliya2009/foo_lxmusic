@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <AssemblyName>foo_lx_bridge</AssemblyName>
-    <RootNamespace>TzPlayer</RootNamespace>
+    <RootNamespace>LxMusic</RootNamespace>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -25,6 +25,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\user-api-preload.js" LogicalName="TzPlayer.Resources.user-api-preload.js" />
+    <EmbeddedResource Include="Resources\user-api-preload.js" LogicalName="LxMusic.Resources.user-api-preload.js" />
   </ItemGroup>
 </Project>

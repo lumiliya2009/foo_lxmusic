@@ -3,7 +3,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  * Derived from LX Music Mobile 1.8.4 user-api-preload.js.
- * Modified by TZPlayer for third-party source IDs, source-provided search
+ * Modified for third-party source IDs, source-provided search
  * actions, native secure random bytes, and binary HTTP response bridging.
  */
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,7 +7,7 @@ using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     /// <summary>本地数据保护：使用 Windows DPAPI 加密敏感文本，失败时退化为明文。</summary>
     internal static class ProtectedFile

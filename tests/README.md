@@ -1,5 +1,17 @@
 # 回归验证
 
+## 音质回退与播放信息
+
+```powershell
+dotnet run --project ./QualityRegression.csproj -c Release
+./run-input-regression.ps1 -Platform Win32
+./run-input-regression.ps1 -Platform x64
+```
+
+2026-11-20（0.1.6）：桥接程序 38 项离线检查通过，覆盖真实 LX 脚本导入、音质排序、歌曲可用音质、别名去重与排除、尝试记录、剩余数量，以及鉴权失败和限流时停止重试。
+
+原生程序两种架构各 85 项通过，其中新增 23 项验证 403 等媒体错误和无效音频的回退、同曲重试、全部失败只停止一次、取消、重复地址防护、断点续播、定位失败、无法续播时停止，以及真实采样率、码率、格式和动态 VBR 信息上报。样本为确定性模拟，不代表已复现群友的音源环境。
+
 ## 专辑与封面下载
 
 ```powershell

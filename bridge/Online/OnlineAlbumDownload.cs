@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     internal sealed class OnlineAlbumDownload
     {

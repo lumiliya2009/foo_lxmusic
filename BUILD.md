@@ -37,11 +37,12 @@ dotnet build ./bridge/foo_lx_bridge.csproj -c Release -p:RestoreLockedMode=true
 
 ```powershell
 dotnet run --project ./tests/AlbumDownloadRegression.csproj -c Release
+dotnet run --project ./tests/QualityRegression.csproj -c Release
 ./tests/run-input-regression.ps1 -Platform Win32
 ./tests/run-input-regression.ps1 -Platform x64
 ```
 
-测试覆盖播放失败和取消、错误 MIME 类型、专辑分页、封面回退、下载中断以及文件保留。可选联网验证及宿主 UI 检查见 `tests/README.md`。反馈问题时请提供 foobar2000 版本、组件版本、平台和错误提示，勿附带音源订阅地址、账号 Cookie 或带凭据的播放链接。
+测试覆盖音质回退、采样率等播放信息、播放失败和取消、错误 MIME 类型、专辑分页、封面回退、下载中断以及文件保留。可选联网验证及宿主 UI 检查见 `tests/README.md`。反馈问题时请提供 foobar2000 版本、组件版本、平台和错误提示，勿附带音源订阅地址、账号 Cookie 或带凭据的播放链接。
 
 ## 项目结构与许可
 
@@ -50,4 +51,4 @@ dotnet run --project ./tests/AlbumDownloadRegression.csproj -c Release
 - `tests/`：自动回归用例及隔离宿主测试准备脚本。
 - `licenses/`、`THIRD_PARTY_NOTICES.md`：第三方许可证与来源说明。
 
-在线音乐实现移植自 TzPlayer，LX 脚本兼容层派生自 LX Music Mobile 1.8.4。各模块和依赖保留各自的许可证，根目录 MIT 许可不替代桥接程序或第三方代码的许可。版本变更见 `CHANGELOG.md`。
+LX 脚本兼容层派生自 LX Music Mobile 1.8.4。各模块和依赖保留各自的许可证，根目录 MIT 许可不替代桥接程序或第三方代码的许可。版本变更见 `CHANGELOG.md`。

@@ -1,9 +1,9 @@
-﻿﻿﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     /// <summary>歌单导入：公开分享链接、QQ 号、授权账号歌单。</summary>
     public sealed class OnlinePlaylistService

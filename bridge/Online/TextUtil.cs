@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     internal static class TextUtil
     {

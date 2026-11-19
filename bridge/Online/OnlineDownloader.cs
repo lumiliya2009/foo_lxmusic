@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Net;
 using System.Threading;
 using Newtonsoft.Json.Linq;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     /// <summary>在线音乐下载（支持进度与取消）。</summary>
     public static class OnlineDownloader

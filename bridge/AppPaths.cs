@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace TzPlayer.Win
+namespace LxMusic.Bridge
 {
     internal static class AppPaths
     {

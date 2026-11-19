@@ -1,11 +1,11 @@
-﻿﻿﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     public sealed class OnlinePlaylistTarget
     {
@@ -566,7 +566,7 @@ namespace TzPlayer.Win.Online
     }
 }
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     /// <summary>网易云音乐公开 / 授权歌单读取。</summary>
     internal static class NeteasePlaylistLoader

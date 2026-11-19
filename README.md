@@ -4,8 +4,8 @@
 
 ## 下载
 
-- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.5/foo_lxmusic-0.1.5-fb1-x86.fb2k-component)
-- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.5/foo_lxmusic-0.1.5-fb2-x64.fb2k-component)
+- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.6/foo_lxmusic-0.1.6-fb1-x86.fb2k-component)
+- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.6/foo_lxmusic-0.1.6-fb2-x64.fb2k-component)
 
 ## 使用
 

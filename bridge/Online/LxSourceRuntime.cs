@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -15,7 +15,7 @@ using Jint.Native;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     /// <summary>
     /// LX 自定义音源宿主（Jint + 官方 preload）。
@@ -23,7 +23,7 @@ namespace TzPlayer.Win.Online
     /// </summary>
     public sealed class LxSourceRuntime : IDisposable
     {
-        private const string PreloadResource = "TzPlayer.Resources.user-api-preload.js";
+        private const string PreloadResource = "LxMusic.Resources.user-api-preload.js";
         private const int DefaultRequestTimeoutMs = 20000;
         private const int DefaultFollowMax = 5;
         private const int MaxScriptResponseBytes = 4 * 1024 * 1024;
@@ -539,7 +539,7 @@ namespace TzPlayer.Win.Online
         private static byte[] EncodeMultipart(JObject formData, Dictionary<string, string> headers)
         {
             var existing = headers.FirstOrDefault(k => k.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)).Value;
-            var boundary = "----TzPlayer" + Guid.NewGuid().ToString("N");
+            var boundary = "----LxMusic" + Guid.NewGuid().ToString("N");
             if (string.IsNullOrWhiteSpace(existing) || existing.IndexOf("boundary=", StringComparison.OrdinalIgnoreCase) < 0)
                 headers["Content-Type"] = "multipart/form-data; boundary=" + boundary;
 

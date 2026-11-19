@@ -1,9 +1,9 @@
-﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
 
-namespace TzPlayer.Win.Online
+namespace LxMusic.Bridge.Online
 {
     /// <summary>在线音乐平台。与 Android 版保持相同的 id / 别名。</summary>
     public sealed class OnlinePlatform

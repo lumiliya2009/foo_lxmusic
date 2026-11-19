@@ -2,7 +2,7 @@
 
 DECLARE_COMPONENT_VERSION(
     "LX Online Music",
-    "0.1.5",
+    "0.1.6",
     "导入 LX Music 自定义音源，在 foobar2000 中搜索、播放与批量下载在线歌曲，并获取歌词。\n"
     "支持 foobar2000 v1 x86 与 v2 x64。\n\n"
     "请仅在获得授权并遵守相应服务条款的前提下使用在线内容。"
