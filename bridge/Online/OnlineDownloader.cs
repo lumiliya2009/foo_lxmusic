@@ -69,6 +69,9 @@ namespace LxMusic.Bridge.Online
             var temporary = target + "." + Guid.NewGuid().ToString("N") + ".part";
 
             var request = (HttpWebRequest)WebRequest.Create(url);
+            // The session limits active jobs. Do not let Framework's per-host
+            // default of two connections silently reduce the chosen count.
+            request.ServicePoint.ConnectionLimit = Math.Max(16, request.ServicePoint.ConnectionLimit);
             request.UserAgent = OnlineHttp.BrowserUserAgent;
             request.Timeout = 30000;
             request.ReadWriteTimeout = 60000;

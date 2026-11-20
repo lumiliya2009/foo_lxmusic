@@ -50,6 +50,7 @@ namespace LxMusic.Bridge.Online
                         case "resolve": Resolve(repository.Value, args); break;
                         case "lyrics": Lyrics(args); break;
                         case "download-batch": DownloadBatch(repository.Value, args); break;
+                        case "download-search": DownloadSearch(repository.Value, args); break;
                         default: throw new InvalidOperationException("未知命令：" + command);
                     }
                 }
@@ -249,116 +250,101 @@ namespace LxMusic.Bridge.Online
             Emit("LYRICS", PayloadCodec.EncodeText(lyric));
         }
 
+        private static bool DownloadFlag(string[] args, int index, bool fallback)
+        {
+            if (args.Length <= index) return fallback;
+            if (args[index] != "0" && args[index] != "1") throw new InvalidOperationException("下载选项无效");
+            return args[index] == "1";
+        }
+
+        private static int DownloadWorkers(string[] args, int index)
+        {
+            if (args.Length <= index) return 1;
+            if (!int.TryParse(args[index], out var value) || value < 1 || value > 16)
+                throw new InvalidOperationException("同时下载任务数必须为 1～16");
+            return value;
+        }
+
         private static void DownloadBatch(OnlineMusicRepository repository, string[] args)
         {
             if (args.Length < 5) throw new InvalidOperationException("下载参数不完整");
-            var listPath = PayloadCodec.DecodeText(args[2]);
-            var outputDirectory = PayloadCodec.DecodeText(args[3]);
-            var quality = OnlineQuality.FromId(args[4]) ?? OnlineQuality.High;
-            var namingTemplate = args.Length > 5 ? ArgText(args, 5) : null;
-            if (namingTemplate != null) DownloadFileNaming.ValidateTemplate(namingTemplate);
-            var payloads = File.ReadAllLines(listPath, Encoding.UTF8).Where(line => !string.IsNullOrWhiteSpace(line)).ToList();
+            var template = args.Length > 5 ? ArgText(args, 5) : null;
+            if (template != null) DownloadFileNaming.ValidateTemplate(template);
+            var payloads = File.ReadAllLines(ArgText(args, 2), Encoding.UTF8).Where(line => !string.IsNullOrWhiteSpace(line)).ToList();
             if (payloads.Count == 0) throw new InvalidOperationException("没有可下载的歌曲或专辑");
+            if (repository.Sources.State.Imported) repository.Sources.Use(repository.Sources.State.Id);
+            var session = new DownloadSession(repository, ArgText(args, 3), args[4], template,
+                DownloadFlag(args, 6, true), DownloadFlag(args, 7, false), Emit, UserMessage, DownloadWorkers(args, 8));
+            session.Process(payloads);
+            session.Finish();
+        }
 
-            var jobs = new List<DownloadJob>();
-            var albums = new List<OnlineAlbumDownload>();
-            var errors = new List<string>();
-            var warnings = new List<string>();
-            var failedItems = 0;
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var encoded in payloads)
+        private static void DownloadSearch(OnlineMusicRepository repository, string[] args)
+        {
+            // folder, quality, template, skip failures, cleanup, source, site, type, keyword, pages, limit
+            if (args.Length != 13 && args.Length != 14) throw new InvalidOperationException("全页下载参数不完整");
+            var type = args[9];
+            if (type != "track" && type != "album") throw new InvalidOperationException("全页下载支持单曲和专辑搜索结果");
+            var query = ArgText(args, 10).Trim();
+            if (query.Length == 0) throw new InvalidOperationException("搜索关键词为空");
+            var knownPages = int.TryParse(args[11], out var hint) && hint > 0 ? hint : -1;
+            var limit = PositiveInt(args[12], DefaultLimit);
+            if (limit > 50) throw new InvalidOperationException("每页数量无效");
+            repository.Sources.Use(args[7]);
+            var platform = OnlinePlatform.FromId(args[8]);
+            if (!repository.Sources.State.Descriptor.Supports(platform)) throw new InvalidOperationException("所选音源不支持该站点");
+            if (type == "album" && !platform.SupportsCollections) throw new InvalidOperationException("该站点不支持专辑搜索");
+            var session = new DownloadSession(repository, ArgText(args, 2), args[3], ArgText(args, 4),
+                DownloadFlag(args, 5, true), DownloadFlag(args, 6, false), Emit, UserMessage, DownloadWorkers(args, 13));
+            var seenPages = new HashSet<string>(StringComparer.Ordinal);
+            var consecutiveFailures = 0;
+            const int maxPages = 10000;
+            for (var number = 1; number <= maxPages && !session.Stopped; number++)
             {
-                BridgePayload payload = null;
+                var label = "第 " + number + " 页" + (knownPages > 0 ? " / 共 " + knownPages + " 页" : "（总页数未知）");
+                session.Status("正在读取" + label);
+                List<string> payloads;
+                OnlinePage page;
                 try
                 {
-                    payload = PayloadCodec.Parse(encoded);
-                    if (!seen.Add(payload.Kind + ":" + payload.PlatformId + ":" + payload.Id)) continue;
-                    if (payload.Kind == "track") jobs.Add(new DownloadJob { Track = payload.ToTrack(), Directory = outputDirectory });
-                    else if (payload.Kind == "album")
+                    if (type == "track")
                     {
-                        Emit("STATUS", PayloadCodec.EncodeText("正在读取整张专辑：" + payload.Title));
-                        var album = OnlineAlbumDownload.Prepare(payload.ToCollection(), outputDirectory, OnlineCollectionSearch.AlbumTracks);
-                        albums.Add(album);
-                        for (var i = 0; i < album.Tracks.Count; i++)
-                            jobs.Add(new DownloadJob { Track = album.Tracks[i], Directory = album.DirectoryPath, Album = album, AlbumIndex = i });
+                        var result = repository.Search(platform, query, number, limit);
+                        page = result;
+                        payloads = result.Tracks.Select(track => PayloadCodec.FromTrack(track, args[3])).ToList();
                     }
-                    else throw new InvalidOperationException("仅支持下载歌曲和专辑");
-                }
-                catch (Exception ex)
-                {
-                    failedItems++;
-                    errors.Add((payload == null ? "下载项目" : payload.Title) + "：" + UserMessage(ex));
-                }
-            }
-
-            var covers = 0;
-            foreach (var album in albums)
-            {
-                Emit("STATUS", PayloadCodec.EncodeText("正在保存专辑封面：" + album.Album.Title));
-                try { album.SaveArtwork(); covers++; }
-                catch (Exception ex) { warnings.Add(album.Album.Title + "：" + UserMessage(ex)); }
-            }
-            var ok = 0;
-            var failedTracks = 0;
-            var looseTotal = jobs.Count(job => job.Album == null);
-            var looseNumber = 0;
-            for (var index = 0; index < jobs.Count; index++)
-            {
-                var job = jobs[index];
-                var track = job.Track;
-                if (job.Album == null) looseNumber++;
-                try
-                {
-                    var media = repository.Resolve(track, quality);
-                    var wantedName = job.Album == null ? OnlineDownloader.BuildFileName(track, media, namingTemplate, looseNumber, looseTotal)
-                        : job.Album.TrackFileName(job.AlbumIndex, media, namingTemplate);
-                    var fileName = UniqueFileName(job.Directory, wantedName);
-                    var lastReport = DateTime.MinValue;
-                    Emit("STATUS", PayloadCodec.EncodeText("正在下载 " + (index + 1) + "/" + jobs.Count + "：" + track));
-                    OnlineDownloader.Download(media.Url, job.Directory, fileName, (received, total) =>
+                    else
                     {
-                        var now = DateTime.UtcNow;
-                        if ((now - lastReport).TotalMilliseconds < 100 && (total <= 0 || received < total)) return;
-                        lastReport = now;
-                        Emit("TRANSFER", (index + 1).ToString(CultureInfo.InvariantCulture),
-                            jobs.Count.ToString(CultureInfo.InvariantCulture),
-                            received.ToString(CultureInfo.InvariantCulture),
-                            Math.Max(0, total).ToString(CultureInfo.InvariantCulture),
-                            PayloadCodec.EncodeText(track.ToString()));
-                    }, CancellationToken.None);
-                    ok++;
+                        var result = OnlineCollectionSearch.Search(platform, OnlineSearchType.Albums, query, number, limit);
+                        page = result;
+                        payloads = result.Collections.Select(album => PayloadCodec.FromCollection(album, "album", args[3])).ToList();
+                    }
+                    if (page == null || page.Page != number) throw new InvalidOperationException("站点返回了错误的页码");
                 }
                 catch (Exception ex)
                 {
-                    failedTracks++;
-                    errors.Add((track == null ? "第 " + (index + 1) + " 首" : track.ToString()) + "：" + UserMessage(ex));
+                    session.PageFailed(number, ex);
+                    if (++consecutiveFailures >= 3 && knownPages < 1)
+                        session.Stop("总页数未知且连续 3 页读取失败，已停止继续翻页");
+                    if (knownPages > 0 && number >= knownPages) break;
+                    if (number == maxPages) session.Stop("已达到 10000 页处理上限");
+                    continue;
                 }
-                Emit("PROGRESS", (index + 1).ToString(CultureInfo.InvariantCulture),
-                    jobs.Count.ToString(CultureInfo.InvariantCulture),
-                    PayloadCodec.EncodeText(track == null ? "第 " + (index + 1) + " 首" : track.ToString()));
+                consecutiveFailures = 0;
+                session.PagesRead++;
+                if (page.TotalPages.HasValue && page.TotalPages.Value > 0) knownPages = page.TotalPages.Value;
+                if (payloads.Count == 0) break; // Public catalogs can advertise inaccessible extra pages.
+                var fingerprint = string.Join("\n", payloads.Select(item => {
+                    var parsed = PayloadCodec.Parse(item); return parsed.PlatformId + ":" + parsed.Kind + ":" + parsed.Id;
+                }).OrderBy(id => id, StringComparer.Ordinal));
+                if (!seenPages.Add(fingerprint)) { session.Stop("站点重复返回同一页，已停止继续翻页"); break; }
+                var totalHint = page.TotalKnown ? page.Total : knownPages > 0 ? (int)Math.Min(int.MaxValue, (long)knownPages * limit) : maxPages * limit;
+                session.Process(payloads, (number - 1) * limit, totalHint,
+                    "第 " + number + " 页" + (knownPages > 0 ? " / 共 " + knownPages + " 页" : ""));
+                if (!page.HasNext) break;
+                if (number == maxPages) session.Stop("已达到 10000 页处理上限");
             }
-            var summary = "下载完成：成功 " + ok + " 首，歌曲失败 " + failedTracks + " 首";
-            if (failedItems > 0) summary += "；有 " + failedItems + " 个下载项目未能读取";
-            if (albums.Count > 0) summary += "\r\n专辑封面：已保存 " + covers + " 张";
-            summary += "\r\n保存到：" + Path.GetFullPath(outputDirectory);
-            foreach (var album in albums.Take(10)) summary += "\r\n" + album.DirectoryPath;
-            if (errors.Count > 0) summary += "\r\n\r\n" + string.Join("\r\n", errors.Take(10));
-            if (warnings.Count > 0) summary += "\r\n\r\n封面未保存（不影响歌曲下载）：\r\n" + string.Join("\r\n", warnings.Take(10));
-            Emit("DONE", ok.ToString(CultureInfo.InvariantCulture), failedTracks.ToString(CultureInfo.InvariantCulture),
-                PayloadCodec.EncodeText(summary));
-        }
-
-        private sealed class DownloadJob
-        {
-            internal OnlineTrack Track;
-            internal string Directory;
-            internal OnlineAlbumDownload Album;
-            internal int AlbumIndex;
-        }
-
-        private static string UniqueFileName(string directory, string fileName)
-        {
-            return Path.GetFileName(OnlineAlbumDownload.UniquePath(directory, fileName, false));
+            session.Finish();
         }
 
         private static string ArgText(string[] args, int index)

@@ -97,6 +97,51 @@ static class UpdateRegression
         Check(UpdateChecker.Parse(draft.ToString(), "0.1.7", "x64") == null, "prerelease offered");
     }
 
+    static void TestFallbacks()
+    {
+        var bytes = Package();
+        var current = Release(bytes).ToString();
+        var newer = current.Replace("0.1.8", "0.1.10");
+        foreach (var feed in new[] { "api.github.com", "raw.githubusercontent.com", "cdn.jsdelivr.net" })
+        foreach (var directRoute in new[] { false, true })
+        {
+            var attempts = 0;
+            var result = UpdateChecker.Check("0.1.7", "x64", (url, direct) => {
+                Interlocked.Increment(ref attempts);
+                if (new Uri(url).Host != feed || direct != directRoute) throw new IOException("offline route");
+                return current;
+            });
+            Check(result?.Version == "v0.1.8" && attempts == 6, "fallback failed: " + feed + "/" + directRoute);
+        }
+        var latest = UpdateChecker.Check("0.1.7", "x86", (url, direct) => {
+            if (url.Contains("api.github")) { Thread.Sleep(80); return newer; }
+            return current;
+        });
+        Check(latest?.Version == "v0.1.10", "fast stale CDN hid newer API result");
+        latest = UpdateChecker.Check("0.1.9", "x64", (url, direct) => url.Contains("raw.githubusercontent") ? newer : current);
+        Check(latest?.Version == "v0.1.10", "stale no-update result hid newer manifest");
+        Check(UpdateChecker.Check("0.1.10", "x64", (url, direct) => newer) == null, "latest version prompted");
+        Reject(() => UpdateChecker.Check("0.1.7", "x64", (url, direct) => { throw new IOException("offline"); }), "total outage reported latest");
+        Reject(() => UpdateChecker.Check("0.1.7", "x64", (url, direct) => "<html>blocked</html>"), "invalid feeds reported latest");
+        latest = UpdateChecker.Check("0.1.7", "x64", (url, direct) => url.Contains("jsdelivr") ? current : "invalid");
+        Check(latest?.Version == "v0.1.8", "malformed feed blocked valid fallback");
+
+        var routes = new List<bool>();
+        var downloaded = UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => {
+            routes.Add(direct);
+            if (!direct) throw new IOException("dead proxy");
+            return bytes;
+        });
+        Check(downloaded.SequenceEqual(bytes) && routes.SequenceEqual(new[] { false, true }), "package direct fallback failed");
+        routes.Clear();
+        downloaded = UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => {
+            routes.Add(direct); return direct ? bytes : new byte[bytes.Length];
+        });
+        Check(downloaded.SequenceEqual(bytes) && routes.Count == 2, "corrupt package did not retry");
+        Reject(() => UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => new byte[bytes.Length]), "corrupt fallback installed");
+        Reject(() => UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => { throw new IOException("offline"); }), "package outage accepted");
+    }
+
     static void TestPackages()
     {
         foreach (var architecture in new[] { "x86", "x64" })
@@ -217,7 +262,7 @@ while (!File.Exists(Path.Combine(root, ""exit""))) Thread.Sleep(50);
         try
         {
             Directory.CreateDirectory(Root);
-            TestMetadata(); TestPackages(); TestInstall(); TestHelper(false); TestHelper(true);
+            TestMetadata(); TestFallbacks(); TestPackages(); TestInstall(); TestHelper(false); TestHelper(true);
             if (args.Contains("--live"))
             {
                 var proxy = args.FirstOrDefault(arg => arg.StartsWith("--proxy=", StringComparison.Ordinal));

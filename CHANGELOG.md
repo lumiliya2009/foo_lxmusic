@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10
+
+- Download all search pages with configurable parallel tasks, failure skipping and post-download duplicate cleanup.
+- Add a preferences page and optional compact download dialog.
+- Check for component updates automatically with fallback feeds and connection routes.
+- Copy a selected track's playback URL from its context menu.
+
 ## 0.1.9
 
 - Choose or customize download filenames with a preview and saved preferences.

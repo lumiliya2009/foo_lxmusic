@@ -236,6 +236,38 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qu
         Check(Directory.GetFiles(directory).Length == 1, "failed/cancelled downloads left partial files");
     }
 
+    static void TestDuplicateCleanup()
+    {
+        var directory = Path.Combine(root, "duplicates");
+        Directory.CreateDirectory(directory);
+        var bytes = Encoding.ASCII.GetBytes("fLaC_same_content");
+        Func<string, byte[], string> save = (name, data) => { var path = Path.Combine(directory, name); File.WriteAllBytes(path, data); return path; };
+        var old = save("existing.flac", bytes);
+        var oldCopy = save("existing-copy.flac", bytes);
+        var duplicate = save("different-name.flac", bytes);
+        var different = save("same-length.flac", Encoding.ASCII.GetBytes("fLaC_diff_content"));
+        var fresh = save("new.flac", new byte[] { 9, 8, 7, 6 });
+        var freshCopy = save("new-copy.flac", new byte[] { 9, 8, 7, 6 });
+        var cover = save("cover.jpg", bytes);
+        var partial = save("unfinished.flac.part", bytes);
+        var removed = DownloadDuplicateCleaner.Clean(directory, new[] { duplicate, different, fresh, freshCopy });
+        Check(removed == 2 && !File.Exists(duplicate), "identical audio not removed");
+        Check(File.ReadAllBytes(old).SequenceEqual(bytes) && File.Exists(oldCopy), "old duplicate files were deleted");
+        Check(File.Exists(different), "different audio of the same size was deleted");
+        Check(File.Exists(fresh) != File.Exists(freshCopy), "no existing copy: exactly one new file should survive");
+        Check(File.Exists(cover) && File.Exists(partial), "cover or incomplete file was touched");
+        var locked = save("locked.flac", bytes);
+        var warnings = new System.Collections.Generic.List<string>();
+        using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.Read))
+            Check(DownloadDuplicateCleaner.Clean(directory, new[] { locked }, warning: warnings.Add) == 0, "locked duplicate removed");
+        Check(File.Exists(locked) && warnings.Count > 0, "locked file not retained/reported");
+        var empty = save("empty.flac", new byte[0]);
+        Check(DownloadDuplicateCleaner.Clean(directory, new[] { empty }) == 0 && File.Exists(empty), "empty file deleted");
+        Fails(() => DownloadDuplicateCleaner.Clean(directory, new[] { cover }), "non-audio cleanup target accepted");
+        Fails(() => DownloadDuplicateCleaner.Clean(directory, new[] { Path.Combine(root, "outside.flac") }), "cleanup escaped output directory");
+        Check(DownloadDuplicateCleaner.Clean(directory, new[] { duplicate }) == 0, "missing download caused unsafe cleanup");
+    }
+
     static void TestLiveAlbum()
     {
         var results = OnlineCollectionSearch.Search(OnlinePlatform.Qq, OnlineSearchType.Albums, "梦中的你 张学友", 1, 10);
@@ -260,6 +292,7 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qu
             TestNaming();
             TestNamingBridge();
             TestTransfers();
+            TestDuplicateCleanup();
             if (args.Contains("--live")) TestLiveAlbum();
             Console.WriteLine(checks + " album/cover/download regression checks passed");
             return 0;

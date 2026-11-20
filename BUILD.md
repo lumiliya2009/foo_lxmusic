@@ -37,6 +37,7 @@ dotnet build ./bridge/foo_lx_bridge.csproj -c Release -p:RestoreLockedMode=true
 
 ```powershell
 dotnet run --project ./tests/AlbumDownloadRegression.csproj -c Release
+dotnet run --project ./tests/DownloadPagesRegression.csproj -c Release
 dotnet run --project ./tests/QualityRegression.csproj -c Release
 dotnet run --project ./tests/UpdateRegression.csproj -c Release
 ./tests/run-input-regression.ps1 -Platform Win32

@@ -50,9 +50,10 @@ static class BridgeFixture
                 return process.ExitCode;
             }
         }
-        if (command == "download-batch")
+        if (command == "download-batch" || command == "download-search")
         {
-            File.WriteAllText(Path.Combine(Root, "download-template.txt"), Decode(args[5]));
+            File.WriteAllText(Path.Combine(Root, "download-template.txt"), Decode(args[command == "download-batch" ? 5 : 4]));
+            File.WriteAllLines(Path.Combine(Root, "download-options.txt"), args);
             Console.WriteLine("DONE\t0\t0\t" + Encode("测试下载设置已保存，未下载音频。"));
             return 0;
         }
@@ -85,6 +86,7 @@ static class BridgeFixture
             string mode = File.Exists(modeFile) ? File.ReadAllText(modeFile).Trim() : "fail";
             if (mode == "slow") Thread.Sleep(10000);
             if (mode == "empty") return 0;
+            if (mode == "link") { Emit("URL", "https://example.com/fixture.flac?test=copy-link"); return 0; }
             if (mode == "ok" || mode == "decoder")
             {
                 Emit("URL", Path.Combine(Root, mode == "ok" ? "fixture.wav" : "invalid.wav"));

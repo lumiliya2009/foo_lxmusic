@@ -1,4 +1,6 @@
 #include "stdafx.h"
+#include <foobar2000/helpers/atl-misc.h>
+#include <foobar2000/SDK/coreDarkMode.h>
 
 namespace lxmusic {
 
@@ -12,11 +14,35 @@ cfg_string g_download_quality({ 0x628a3da5, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 
 cfg_string g_search_site_id({ 0x628a3da6, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 cfg_string g_search_history({ 0x628a3da7, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 cfg_string g_download_naming({ 0x628a3da8, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "{序号} - {曲名} - {艺术家}");
+cfg_bool g_download_skip_failures({ 0x628a3da9, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
+cfg_bool g_download_cleanup({ 0x628a3daa, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, false);
+cfg_int g_download_workers({ 0x628a3dab, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, 3);
+cfg_bool g_download_overrides({ 0x628a3dac, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
+cfg_bool g_auto_updates({ 0x628a3dad, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
+const GUID guid_preferences = { 0x85d64b47, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 std::string dialog_text(HWND dialog, UINT id) {
     pfc::string8 value;
     uGetDlgItemText(dialog, id, value);
     return value.c_str();
+}
+
+std::string default_download_folder() {
+    wchar_t path[MAX_PATH]{};
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_MYMUSIC, nullptr, SHGFP_TYPE_CURRENT, path)))
+        return pfc::stringcvt::string_utf8_from_wide(path).get_ptr();
+    return {};
+}
+
+void fill_download_naming(HWND control, const std::string& current) {
+    CComboBox naming(control);
+    naming.LimitText(256);
+    for (const auto value : { L"{序号} - {曲名} - {艺术家}", L"{序号} - {曲名}", L"{曲名} - {艺术家}",
+        L"{艺术家} - {曲名}", L"{曲名}", L"{专辑名} - {序号} - {曲名}", L"{序号} - {曲名} - {艺术家} - {音质}" })
+        naming.AddString(value);
+    const pfc::stringcvt::string_wide_from_utf8 saved(current.c_str());
+    if (naming.FindStringExact(-1, saved) == CB_ERR) naming.AddString(saved);
+    naming.SetWindowText(saved);
 }
 
 class search_dialog : public CDialogImpl<search_dialog> {
@@ -321,6 +347,7 @@ public:
     std::string folder;
     std::string quality = "320k";
     std::string naming_template;
+    DownloadOptions options;
 
     BEGIN_MSG_MAP(download_dialog)
         MSG_WM_INITDIALOG(OnInitDialog)
@@ -332,6 +359,7 @@ public:
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_QUALITY, CBN_SELCHANGE, OnNamingChanged)
         COMMAND_HANDLER(IDC_LX_SELECT_ALL, BN_CLICKED, OnSelectAll)
         COMMAND_HANDLER(IDC_LX_SELECT_NONE, BN_CLICKED, OnSelectNone)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_ALL_PAGES, BN_CLICKED, OnScopeChanged)
         COMMAND_ID_HANDLER(IDOK, OnOK)
         COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
     END_MSG_MAP()
@@ -354,19 +382,17 @@ public:
         else if (quality == "flac24bit" || quality == "hires") quality_index = 3;
         combo.SetCurSel(quality_index);
 
-        auto naming = CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_NAMING));
-        naming.LimitText(256);
-        static const wchar_t* templates[] = {
-            L"{序号} - {曲名} - {艺术家}", L"{序号} - {曲名}", L"{曲名} - {艺术家}",
-            L"{艺术家} - {曲名}", L"{曲名}", L"{专辑名} - {序号} - {曲名}",
-            L"{序号} - {曲名} - {艺术家} - {音质}"
-        };
-        for (const auto value : templates) naming.AddString(value);
-        const pfc::stringcvt::string_wide_from_utf8 saved(naming_template.c_str());
-        if (naming.FindStringExact(-1, saved) == CB_ERR) naming.AddString(saved);
-        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_NAMING, naming_template.c_str());
+        fill_download_naming(GetDlgItem(IDC_LX_DOWNLOAD_NAMING), naming_template);
+        auto workers = CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_WORKERS));
+        for (int i = 1; i <= 16; ++i) workers.AddString(std::to_wstring(i).c_str());
+        workers.SetCurSel(std::clamp(options.workers, 1, 16) - 1);
         preview->window = m_hWnd;
         SchedulePreview();
+        GetDlgItem(IDC_LX_DOWNLOAD_ALL_PAGES).EnableWindow(options.can_all_pages ? TRUE : FALSE);
+        CheckDlgButton(IDC_LX_DOWNLOAD_ALL_PAGES, options.all_pages ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(IDC_LX_DOWNLOAD_SKIP_FAILURES, options.skip_failures ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(IDC_LX_DOWNLOAD_CLEANUP, options.cleanup_duplicates ? BST_CHECKED : BST_UNCHECKED);
+        UpdateScope();
 
         INITCOMMONCONTROLSEX common_controls{ sizeof(common_controls), ICC_LISTVIEW_CLASSES };
         InitCommonControlsEx(&common_controls);
@@ -397,11 +423,14 @@ public:
             ListView_InsertItem(list, &item);
             ListView_SetCheckState(list, static_cast<int>(index), TRUE);
         }
+        if (!g_download_overrides) MakeCompact();
+        else GetDlgItem(IDC_LX_DOWNLOAD_SUMMARY).ShowWindow(SW_HIDE);
         return TRUE;
     }
 
     LRESULT OnSelectAll(WORD, WORD, HWND, BOOL&) { SetAllChecks(true); return 0; }
     LRESULT OnSelectNone(WORD, WORD, HWND, BOOL&) { SetAllChecks(false); return 0; }
+    LRESULT OnScopeChanged(WORD, WORD, HWND, BOOL&) { UpdateScope(); return 0; }
 
     void OnDestroy() {
         KillTimer(preview_timer);
@@ -468,13 +497,17 @@ public:
         }
         quality = SelectedQuality();
         naming_template = dialog_text(*this, IDC_LX_DOWNLOAD_NAMING);
+        options.all_pages = options.can_all_pages && IsDlgButtonChecked(IDC_LX_DOWNLOAD_ALL_PAGES) == BST_CHECKED;
+        options.skip_failures = IsDlgButtonChecked(IDC_LX_DOWNLOAD_SKIP_FAILURES) == BST_CHECKED;
+        options.cleanup_duplicates = IsDlgButtonChecked(IDC_LX_DOWNLOAD_CLEANUP) == BST_CHECKED;
+        options.workers = std::clamp(CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_WORKERS)).GetCurSel() + 1, 1, 16);
 
         std::vector<std::string> checked;
         const auto list = GetDlgItem(IDC_LX_DOWNLOAD_ITEMS).m_hWnd;
         for (size_t index = 0; index < payloads.size(); ++index) {
             if (ListView_GetCheckState(list, static_cast<int>(index))) checked.push_back(payloads[index]);
         }
-        if (checked.empty()) {
+        if (checked.empty() && !options.all_pages) {
             MessageBoxW(L"请至少勾选一个下载项目。", L"LX 批量下载", MB_OK | MB_ICONINFORMATION);
             return 0;
         }
@@ -484,6 +517,47 @@ public:
     }
     LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
 private:
+    void MoveControl(int id, int x, int y, int width, int height) {
+        RECT rect{ x, y, x + width, y + height };
+        MapDialogRect(&rect);
+        GetDlgItem(id).SetWindowPos(nullptr, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER);
+    }
+
+    void MakeCompact() {
+        KillTimer(preview_timer);
+        ++preview->generation;
+        preview->valid = true;
+        GetDlgItem(IDOK).EnableWindow(TRUE);
+        for (const auto id : { IDC_LX_FOLDER, IDC_LX_BROWSE, IDC_LX_DOWNLOAD_QUALITY, IDC_LX_DOWNLOAD_WORKERS,
+            IDC_LX_DOWNLOAD_NAMING, IDC_LX_DOWNLOAD_PREVIEW, IDC_LX_DOWNLOAD_SKIP_FAILURES, IDC_LX_DOWNLOAD_CLEANUP,
+            IDC_LX_FOLDER_LABEL, IDC_LX_QUALITY_LABEL, IDC_LX_WORKERS_LABEL, IDC_LX_NAMING_LABEL,
+            IDC_LX_NAMING_HINT, IDC_LX_PREVIEW_LABEL, IDC_LX_CLEANUP_HINT }) GetDlgItem(id).ShowWindow(SW_HIDE);
+        const auto summary = "保存到：" + folder + "\n" + quality + " · 同时 " + std::to_string(options.workers) +
+            " 个任务；默认参数可在“首选项 → 工具 → LX 在线音乐”修改。";
+        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_SUMMARY, summary.c_str());
+        GetDlgItem(IDC_LX_DOWNLOAD_SUMMARY).ShowWindow(SW_SHOW);
+        MoveControl(IDC_LX_DOWNLOAD_ALL_PAGES, 10, 10, 410, 12);
+        MoveControl(IDC_LX_DOWNLOAD_SUMMARY, 10, 30, 410, 25);
+        MoveControl(IDC_LX_DOWNLOAD_ITEMS_LABEL, 10, 64, 265, 10);
+        MoveControl(IDC_LX_SELECT_ALL, 302, 59, 55, 16);
+        MoveControl(IDC_LX_SELECT_NONE, 365, 59, 55, 16);
+        MoveControl(IDC_LX_DOWNLOAD_ITEMS, 10, 80, 410, 140);
+        MoveControl(IDOK, 295, 230, 62, 16);
+        MoveControl(IDCANCEL, 365, 230, 55, 16);
+        RECT wanted{ 0, 0, 430, 256 }, client{}, window{};
+        MapDialogRect(&wanted); GetClientRect(&client); GetWindowRect(&window);
+        SetWindowPos(nullptr, 0, 0, window.right - window.left,
+            wanted.bottom + (window.bottom - window.top) - client.bottom, SWP_NOMOVE | SWP_NOZORDER);
+        CenterWindow(GetParent());
+    }
+
+    void UpdateScope() {
+        const bool all = options.can_all_pages && IsDlgButtonChecked(IDC_LX_DOWNLOAD_ALL_PAGES) == BST_CHECKED;
+        for (const auto control : { IDC_LX_DOWNLOAD_ITEMS, IDC_LX_SELECT_ALL, IDC_LX_SELECT_NONE })
+            GetDlgItem(control).EnableWindow(all ? FALSE : TRUE);
+        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_ITEMS_LABEL, all ? "将从第 1 页逐页下载全部结果。" : "下载项目（专辑含全部歌曲和封面）：");
+    }
+
     static constexpr UINT_PTR preview_timer = 21;
     struct preview_state { HWND window = nullptr; size_t generation = 0; bool valid = false; };
     std::shared_ptr<preview_state> preview = std::make_shared<preview_state>();
@@ -510,7 +584,115 @@ private:
     }
 };
 
+class preferences_dialog : public CDialogImpl<preferences_dialog>, public preferences_page_instance {
+public:
+    enum { IDD = IDD_LX_PREFERENCES };
+    explicit preferences_dialog(preferences_page_callback::ptr callback) : callback_(callback) {}
+    t_uint32 get_state() override {
+        return preferences_state::resettable | preferences_state::dark_mode_supported |
+            (changed_ ? preferences_state::changed : 0);
+    }
+    void apply() override {
+        const auto pattern = dialog_text(*this, IDC_LX_DOWNLOAD_NAMING);
+        try {
+            const auto check = run_bridge_noabort({ "download-name-preview", base64url_encode_text(pattern), "flac" });
+            if (bridge_message(check, "NAME").empty()) throw std::runtime_error("文件命名格式无效");
+        } catch (const std::exception& ex) {
+            MessageBoxW(pfc::stringcvt::string_wide_from_utf8(ex.what()), L"文件命名格式无效", MB_OK | MB_ICONINFORMATION);
+            GetDlgItem(IDC_LX_DOWNLOAD_NAMING).SetFocus();
+            return;
+        }
+        g_download_folder = dialog_text(*this, IDC_LX_FOLDER).c_str();
+        static const char* qualities[] = { "128k", "320k", "flac", "flac24bit" };
+        g_download_quality = qualities[std::clamp(CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_QUALITY)).GetCurSel(), 0, 3)];
+        g_download_naming = pattern.c_str();
+        g_download_workers = std::clamp(CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_WORKERS)).GetCurSel() + 1, 1, 16);
+        g_download_skip_failures = IsDlgButtonChecked(IDC_LX_DOWNLOAD_SKIP_FAILURES) == BST_CHECKED;
+        g_download_cleanup = IsDlgButtonChecked(IDC_LX_DOWNLOAD_CLEANUP) == BST_CHECKED;
+        g_download_overrides = IsDlgButtonChecked(IDC_LX_DOWNLOAD_OVERRIDES) == BST_CHECKED;
+        g_auto_updates = IsDlgButtonChecked(IDC_LX_AUTO_UPDATES) == BST_CHECKED;
+        changed_ = false;
+        callback_->on_state_changed();
+        start_update_checks();
+    }
+    void reset() override {
+        Load(true);
+        changed_ = true;
+        callback_->on_state_changed();
+    }
+    BEGIN_MSG_MAP(preferences_dialog)
+        MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_HANDLER(IDC_LX_FOLDER, EN_CHANGE, OnChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_NAMING, CBN_EDITCHANGE, OnChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_NAMING, CBN_SELCHANGE, OnChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_QUALITY, CBN_SELCHANGE, OnChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_WORKERS, CBN_SELCHANGE, OnChanged)
+        COMMAND_HANDLER(IDC_LX_AUTO_UPDATES, BN_CLICKED, OnChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_OVERRIDES, BN_CLICKED, OnChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_SKIP_FAILURES, BN_CLICKED, OnChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_CLEANUP, BN_CLICKED, OnChanged)
+        COMMAND_HANDLER(IDC_LX_BROWSE, BN_CLICKED, OnBrowse)
+        COMMAND_HANDLER(IDC_LX_CHECK_NOW, BN_CLICKED, OnCheck)
+    END_MSG_MAP()
+private:
+    preferences_page_callback::ptr callback_;
+    fb2k::CCoreDarkModeHooks dark_;
+    bool changed_ = false, loading_ = true;
+    BOOL OnInitDialog(CWindow, LPARAM) {
+        dark_.AddDialogWithControls(*this);
+        auto quality = CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_QUALITY));
+        for (const auto label : { L"128K", L"320K", L"FLAC", L"Hi-Res / 24bit" }) quality.AddString(label);
+        auto workers = CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_WORKERS));
+        for (int i = 1; i <= 16; ++i) workers.AddString(std::to_wstring(i).c_str());
+        fill_download_naming(GetDlgItem(IDC_LX_DOWNLOAD_NAMING), g_download_naming.get().c_str());
+        Load(false);
+        return FALSE;
+    }
+    void Load(bool defaults) {
+        loading_ = true;
+        const std::string folder = defaults || g_download_folder.get().is_empty() ? default_download_folder() : g_download_folder.get().c_str();
+        uSetDlgItemText(*this, IDC_LX_FOLDER, folder.c_str());
+        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_NAMING, defaults ? "{序号} - {曲名} - {艺术家}" : g_download_naming.get().c_str());
+        const std::string quality = defaults ? "flac" : g_download_quality.get().c_str();
+        CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_QUALITY)).SetCurSel(quality == "128k" ? 0 : quality == "320k" ? 1 : quality == "flac" ? 2 : 3);
+        CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_WORKERS)).SetCurSel((defaults ? 3 : std::clamp(static_cast<int>(g_download_workers), 1, 16)) - 1);
+        CheckDlgButton(IDC_LX_AUTO_UPDATES, defaults || g_auto_updates ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(IDC_LX_DOWNLOAD_OVERRIDES, defaults || g_download_overrides ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(IDC_LX_DOWNLOAD_SKIP_FAILURES, defaults || g_download_skip_failures ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(IDC_LX_DOWNLOAD_CLEANUP, !defaults && g_download_cleanup ? BST_CHECKED : BST_UNCHECKED);
+        loading_ = false;
+    }
+    LRESULT OnChanged(WORD, WORD, HWND, BOOL&) {
+        if (!loading_) { changed_ = true; callback_->on_state_changed(); }
+        return 0;
+    }
+    LRESULT OnBrowse(WORD, WORD, HWND, BOOL&) {
+        BROWSEINFOW info{};
+        info.hwndOwner = *this;
+        info.lpszTitle = L"选择默认下载目录";
+        info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+        if (auto selected = SHBrowseForFolderW(&info)) {
+            wchar_t path[MAX_PATH]{};
+            if (SHGetPathFromIDListW(selected, path)) SetDlgItemText(IDC_LX_FOLDER, path);
+            CoTaskMemFree(selected);
+        }
+        return 0;
+    }
+    LRESULT OnCheck(WORD, WORD, HWND, BOOL&) { command_check_update(); return 0; }
+};
+
+class preferences_page_lxmusic : public preferences_page_impl<preferences_dialog> {
+public:
+    const char* get_name() override { return "LX 在线音乐"; }
+    GUID get_guid() override { return guid_preferences; }
+    GUID get_parent_guid() override { return preferences_page::guid_tools; }
+};
+static preferences_page_factory_t<preferences_page_lxmusic> g_preferences_page;
+
 } // namespace
+
+bool automatic_updates_enabled() { return g_auto_updates; }
+void show_component_preferences() { ui_control::get()->show_preferences(guid_preferences); }
 
 bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources) {
     search_dialog dialog;
@@ -552,19 +734,22 @@ void show_lyrics_dialog(const std::string& caption, const std::string& lyrics) {
     dialog.DoModal(core_api::get_main_window());
 }
 
-bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality, std::string& naming_template) {
+bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality,
+    std::string& naming_template, DownloadOptions& options) {
     download_dialog dialog;
     dialog.payloads = payloads;
     dialog.folder = folder.empty() ? std::string(g_download_folder.get().c_str()) : folder;
     dialog.quality = quality.empty() ? std::string(g_download_quality.get().c_str()) : quality;
     dialog.naming_template = naming_template.empty() ? std::string(g_download_naming.get().c_str()) : naming_template;
+    dialog.options = options;
+    dialog.options.skip_failures = g_download_skip_failures;
+    dialog.options.cleanup_duplicates = g_download_cleanup;
+    dialog.options.workers = std::clamp(static_cast<int>(g_download_workers), 1, 16);
     if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
     folder = dialog.folder;
     quality = dialog.quality;
     naming_template = dialog.naming_template;
-    g_download_folder = folder.c_str();
-    g_download_quality = quality.c_str();
-    g_download_naming = naming_template.c_str();
+    options = dialog.options;
     payloads = std::move(dialog.payloads);
     return true;
 }

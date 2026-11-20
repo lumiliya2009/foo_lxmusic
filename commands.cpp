@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include <cstring>
 #include <atomic>
+#include <ctime>
 
 namespace lxmusic {
 
@@ -23,6 +24,22 @@ struct page_request {
 std::vector<std::weak_ptr<page_request>> g_page_requests;
 std::atomic_bool g_update_pending{ false };
 struct update_guard { ~update_guard() { g_update_pending = false; } };
+cfg_string g_last_update_check({ 0x628a3dae, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
+cfg_string g_notified_update({ 0x628a3daf, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
+UINT_PTR g_update_timer = 0;
+std::time_t g_next_update_attempt = 0;
+bool g_updates_stopping = false;
+
+void CALLBACK update_timer(HWND, UINT, UINT_PTR, DWORD) {
+    if (g_updates_stopping || !automatic_updates_enabled() || g_update_pending) return;
+    const auto now = std::time(nullptr);
+    if (now < g_next_update_attempt) return;
+    std::time_t last = 0;
+    try { last = static_cast<std::time_t>(std::stoll(g_last_update_check.get().c_str())); } catch (...) {}
+    if (last <= now && now - last < 24 * 60 * 60) return;
+    g_next_update_attempt = now + 10 * 60;
+    command_check_update(true);
+}
 
 bool owns_search_page(t_size playlist, const std::string& state) {
     pfc::array_t<uint8_t> data;
@@ -36,6 +53,31 @@ void mark_search_page(t_size playlist, const SearchPage& page) {
     data.set_size(state.size());
     std::memcpy(data.get_ptr(), state.data(), state.size());
     playlist_manager_v2::get()->playlist_set_property(playlist, guid_search_page, data);
+}
+
+bool download_search_context(metadb_handle_list_cref selected, SearchPage& page) {
+    try {
+        if (selected.get_count() == 0) return false;
+        auto playlists = playlist_manager::get();
+        const auto active = playlists->get_active_playlist();
+        if (active == pfc_infinite) return false;
+        pfc::array_t<uint8_t> property;
+        if (!playlist_manager_v2::get()->playlist_get_property(active, guid_search_page, property) || property.get_size() == 0 || property.get_size() > 16384) return false;
+        page = decode_search_state(std::string(reinterpret_cast<const char*>(property.get_ptr()), property.get_size()));
+        if (page.options.type != "track" && page.options.type != "album") return false;
+        metadb_handle_list items;
+        playlists->playlist_get_all_items(active, items);
+        for (t_size i = 0; i < selected.get_count(); ++i) {
+            bool belongs = false;
+            for (t_size j = 0; j < items.get_count(); ++j) if (items[j] == selected[i]) { belongs = true; break; }
+            if (!belongs) return false;
+            std::string encoded;
+            Payload payload;
+            if (!uri_to_payload(selected[i]->get_path(), encoded, &payload)) return false;
+            if (!payload.is_navigation() && (payload.get(pf_kind) != page.options.type || payload.get(pf_platform_id) != page.options.site)) return false;
+        }
+        return true;
+    } catch (...) { return false; }
 }
 
 struct quality_resume_state {
@@ -121,21 +163,23 @@ public:
 static play_callback_static_factory_t<quality_resume_callback> g_quality_resume_callback;
 
 template<typename Worker, typename Done>
-void run_task(const char* title, Worker worker, Done done, bool showItem = false) {
+void run_task(const char* title, Worker worker, Done done, bool showItem = false, bool silentErrors = false) {
     (void)title;
     (void)showItem;
     auto state = std::make_shared<async_state>();
-    fb2k::splitTask([state, worker, done] {
+    fb2k::splitTask([state, worker, done, silentErrors] {
         class silent_status final : public threaded_process_status {} status;
         try { worker(*state, status, fb2k::noAbort); }
         catch (const std::exception& ex) { state->error = ex.what(); }
         catch (...) { state->error = "LX 音源桥接发生未知异常"; }
-        fb2k::inMainThread([state, done] {
+        fb2k::inMainThread([state, done, silentErrors] {
             try {
-                if (!state->error.empty()) popup_message::g_complain("LX 在线音乐操作失败", state->error.c_str());
+                if (!state->error.empty()) {
+                    if (!silentErrors) popup_message::g_complain("LX 在线音乐操作失败", state->error.c_str());
+                }
                 else done(*state);
             } catch (const std::exception& ex) {
-                popup_message::g_complain("LX 在线音乐操作失败", ex.what());
+                if (!silentErrors) popup_message::g_complain("LX 在线音乐操作失败", ex.what());
             } catch (...) {}
         });
     });
@@ -255,6 +299,7 @@ std::string write_payload_file(const std::vector<std::string>& payloads) {
 }
 
 void delete_utf8_file(const std::string& path) {
+    if (path.empty()) return;
     pfc::stringcvt::string_wide_from_utf8 converted(path.c_str());
     DeleteFileW(converted.get_ptr());
 }
@@ -521,9 +566,22 @@ void command_manage_sources() {
         });
 }
 
-void command_check_update() {
+void start_update_checks() {
+    if (g_update_timer) KillTimer(nullptr, g_update_timer);
+    g_update_timer = 0;
+    if (!g_updates_stopping && automatic_updates_enabled()) g_update_timer = SetTimer(nullptr, 0, 15000, update_timer);
+}
+
+void stop_update_checks() {
+    g_updates_stopping = true;
+    if (g_update_timer) KillTimer(nullptr, g_update_timer);
+    g_update_timer = 0;
+}
+
+void command_check_update(bool automatic) {
+    if (g_updates_stopping || (automatic && !automatic_updates_enabled())) return;
     if (g_update_pending.exchange(true)) {
-        popup_message::g_show("正在检查或下载安装包，请稍候。", "LX 在线音乐");
+        if (!automatic) popup_message::g_show("正在检查或下载安装包，请稍候。", "LX 在线音乐");
         return;
     }
     const auto pending = std::make_shared<update_guard>();
@@ -531,9 +589,14 @@ void command_check_update() {
         [pending](async_state& state, threaded_process_status&, abort_callback& abort) {
             state.result = run_bridge({ "check-update", kVersion, sizeof(void*) == 8 ? "x64" : "x86" }, abort);
         },
-        [pending](async_state& state) {
+        [pending, automatic](async_state& state) {
+            if (g_updates_stopping) return;
+            g_last_update_check = std::to_string(std::time(nullptr)).c_str();
+            if (automatic && !automatic_updates_enabled()) return;
             for (const auto& line : state.result.lines) {
                 if (line.fields.size() >= 4 && line.fields[0] == "UPDATE") {
+                    if (automatic && line.fields[2] == g_notified_update.get().c_str()) return;
+                    g_notified_update = line.fields[2].c_str();
                     const auto message = "发现新版本 " + line.fields[2] + "。\n\n是否下载并安装？下载校验完成后将自动重启 foobar2000。";
                     if (MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
                         L"LX 在线音乐更新", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
@@ -567,8 +630,46 @@ void command_check_update() {
                     return;
                 }
             }
-            const auto message = bridge_message(state.result);
-            popup_message::g_show(message.c_str(), "LX 在线音乐");
+            if (!automatic) {
+                const auto message = bridge_message(state.result);
+                popup_message::g_show(message.c_str(), "LX 在线音乐");
+            }
+        }, false, automatic);
+}
+
+void command_copy_link(metadb_handle_list_cref items) {
+    if (items.get_count() != 1) return;
+    std::string encoded;
+    Payload payload;
+    if (!uri_to_payload(items[0]->get_path(), encoded, &payload) || payload.get(pf_kind) != "track") return;
+    auto quality = payload.get(pf_preferred_quality);
+    if (quality.empty()) quality = "flac";
+    run_task("复制播放直链",
+        [encoded, quality](async_state& state, threaded_process_status&, abort_callback& abort) {
+            state.result = run_bridge({ "resolve", encoded, quality }, abort);
+        },
+        [](async_state& state) {
+            std::string url;
+            for (const auto& line : state.result.lines)
+                if (line.fields.size() >= 2 && line.fields[0] == "URL") { url = base64url_decode(line.fields[1]); break; }
+            if ((url.rfind("https://", 0) != 0 && url.rfind("http://", 0) != 0) ||
+                url.size() > 65536 || url.find('\0') != std::string::npos)
+                throw std::runtime_error("音源未返回有效的播放直链");
+            const std::wstring value = pfc::stringcvt::string_wide_from_utf8(url.c_str()).get_ptr();
+            const auto bytes = (value.size() + 1) * sizeof(wchar_t);
+            const auto memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+            if (!memory) throw std::runtime_error("无法分配剪贴板内存");
+            const auto data = GlobalLock(memory);
+            if (!data) { GlobalFree(memory); throw std::runtime_error("无法写入剪贴板"); }
+            std::memcpy(data, value.c_str(), bytes);
+            GlobalUnlock(memory);
+            if (!OpenClipboard(core_api::get_main_window())) {
+                GlobalFree(memory); throw std::runtime_error("剪贴板正被占用，请稍后重试");
+            }
+            const bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory) != nullptr;
+            CloseClipboard();
+            if (!copied) { GlobalFree(memory); throw std::runtime_error("无法复制到剪贴板，请重试"); }
+            popup_message::g_show("已复制播放直链。", "LX 在线音乐");
         });
 }
 
@@ -663,6 +764,9 @@ void command_expand(metadb_handle_list_cref items) {
 }
 
 void command_download(metadb_handle_list_cref items) {
+    SearchPage search;
+    DownloadOptions options;
+    options.can_all_pages = download_search_context(items, search);
     std::vector<std::string> payloads;
     for (size_t index = 0; index < items.get_count(); ++index) {
         try {
@@ -672,28 +776,36 @@ void command_download(metadb_handle_list_cref items) {
                 (payload.is_track() || payload.get(pf_kind) == "album")) payloads.push_back(encoded);
         } catch (...) {}
     }
-    if (payloads.empty()) {
+    if (payloads.empty() && !options.can_all_pages) {
         popup_message::g_show("请选择 LX 在线歌曲或专辑搜索结果。", "LX 批量下载");
         return;
     }
 
     std::string last_folder, quality, naming_template;
-    if (!show_download_dialog(payloads, last_folder, quality, naming_template)) return;
+    options.all_pages = payloads.empty();
+    if (!show_download_dialog(payloads, last_folder, quality, naming_template, options)) return;
     std::string request_file;
-    try { request_file = write_payload_file(payloads); }
+    try { if (!options.all_pages) request_file = write_payload_file(payloads); }
     catch (const std::exception& ex) { popup_message::g_complain("无法创建下载任务", ex); return; }
     const auto output = last_folder;
 
     auto state = std::make_shared<async_state>();
     auto task = threaded_process_callback_lambda::create(
         threaded_process_callback_lambda::on_init_t{},
-        [state, request_file, output, quality, naming_template](threaded_process_status& status, abort_callback& abort) {
+        [state, request_file, output, quality, naming_template, options, search](threaded_process_status& status, abort_callback& abort) {
             status.set_item("正在读取下载项目…");
             status.set_progress(0);
             status.set_progress_secondary(0);
             try {
-                state->result = run_bridge({ "download-batch", base64url_encode_text(request_file),
-                    base64url_encode_text(output), quality, base64url_encode_text(naming_template) }, abort,
+                const auto skip = options.skip_failures ? "1" : "0";
+                const auto cleanup = options.cleanup_duplicates ? "1" : "0";
+                const std::vector<std::string> args = options.all_pages
+                    ? std::vector<std::string>{ "download-search", base64url_encode_text(output), quality, base64url_encode_text(naming_template),
+                        skip, cleanup, search.options.source, search.options.site, search.options.type,
+                        base64url_encode_text(search.options.keyword), std::to_string(search.total_pages), std::to_string(search.limit), std::to_string(options.workers) }
+                    : std::vector<std::string>{ "download-batch", base64url_encode_text(request_file),
+                        base64url_encode_text(output), quality, base64url_encode_text(naming_template), skip, cleanup, std::to_string(options.workers) };
+                state->result = run_bridge(args, abort,
                     [&status](const BridgeLine& line) { update_download_progress(status, line); });
             } catch (const exception_aborted&) {
                 delete_utf8_file(request_file);
@@ -816,20 +928,21 @@ static const GUID guid_lyrics_main = { 0x85d64b42, 0xc949, 0x409d,{ 0xa6, 0x8a, 
 static const GUID guid_manage = { 0x85d64b43, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 static const GUID guid_update = { 0x85d64b44, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 const GUID guid_back = { 0x85d64b45, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_settings = { 0x85d64b48, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 static mainmenu_group_popup_factory g_main_group(guid_main_group, mainmenu_groups::file,
     mainmenu_commands::sort_priority_dontcare, "LX 在线音乐");
 
 class main_commands : public mainmenu_commands {
 public:
-    enum { search, manage, update, lyrics, back, count };
+    enum { search, manage, update, lyrics, back, settings, count };
     t_uint32 get_command_count() override { return count; }
     GUID get_command(t_uint32 index) override {
-        static const GUID values[] = { guid_search, guid_manage, guid_update, guid_lyrics_main, guid_back };
+        static const GUID values[] = { guid_search, guid_manage, guid_update, guid_lyrics_main, guid_back, guid_settings };
         return index < count ? values[index] : pfc::guid_null;
     }
     void get_name(t_uint32 index, pfc::string_base& out) override {
-        static const char* values[] = { "搜索在线音乐…", "管理音源…", "检查更新", "获取所选歌曲歌词", "返回上一层" };
+        static const char* values[] = { "搜索在线音乐…", "管理音源…", "检查更新", "获取所选歌曲歌词", "返回上一层", "设置…" };
         if (index < count) out = values[index];
     }
     bool get_description(t_uint32 index, pfc::string_base& out) override {
@@ -844,6 +957,7 @@ public:
         case search: command_search(); break;
         case manage: command_manage_sources(); break;
         case update: command_check_update(); break;
+        case settings: show_component_preferences(); break;
         case back: command_back(); break;
         case lyrics: { auto items = selected_playlist_items(); command_lyrics(items); break; }
         default: break;
@@ -862,12 +976,13 @@ static const GUID guid_context_quality_128k = { 0xa1e2c301, 0x5b4f, 0x4d8a,{ 0xb
 static const GUID guid_context_quality_320k = { 0xa1e2c302, 0x5b4f, 0x4d8a,{ 0xb3, 0x12, 0x7e, 0xf4, 0x00, 0x9a, 0xc1, 0x02 } };
 static const GUID guid_context_quality_flac = { 0xa1e2c303, 0x5b4f, 0x4d8a,{ 0xb3, 0x12, 0x7e, 0xf4, 0x00, 0x9a, 0xc1, 0x03 } };
 static const GUID guid_context_quality_flac24 = { 0xa1e2c304, 0x5b4f, 0x4d8a,{ 0xb3, 0x12, 0x7e, 0xf4, 0x00, 0x9a, 0xc1, 0x04 } };
+static const GUID guid_context_copy_link = { 0x85d64b49, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 static contextmenu_group_popup_factory g_context_group(guid_context_group, contextmenu_groups::root, "LX 在线音乐", 0);
 
 class context_commands : public contextmenu_item_simple {
 public:
-    enum { lyrics, expand, download, quality_128k, quality_320k, quality_flac, quality_flac24, count };
+    enum { lyrics, expand, download, quality_128k, quality_320k, quality_flac, quality_flac24, copy_link, count };
     GUID get_parent() override { return guid_context_group; }
     unsigned get_num_items() override { return count; }
     void get_item_name(unsigned index, pfc::string_base& out) override {
@@ -878,7 +993,8 @@ public:
             "切换音质: 128K",
             "切换音质: 320K",
             "切换音质: FLAC",
-            "切换音质: Hi-Res / 24bit"
+            "切换音质: Hi-Res / 24bit",
+            "复制播放直链"
         };
         if (index < count) out = values[index];
     }
@@ -886,7 +1002,7 @@ public:
         static const GUID values[] = {
             guid_context_lyrics, guid_context_expand, guid_context_download,
             guid_context_quality_128k, guid_context_quality_320k,
-            guid_context_quality_flac, guid_context_quality_flac24
+            guid_context_quality_flac, guid_context_quality_flac24, guid_context_copy_link
         };
         return index < count ? values[index] : pfc::guid_null;
     }
@@ -898,7 +1014,8 @@ public:
             "切换所选歌曲为 128K 音质并续播。",
             "切换所选歌曲为 320K 音质并续播。",
             "切换所选歌曲为 FLAC 音质并续播。",
-            "切换所选歌曲为 Hi-Res / 24bit 音质并续播。"
+            "切换所选歌曲为 Hi-Res / 24bit 音质并续播。",
+            "使用当前音源解析所选歌曲并复制播放地址。"
         };
         if (index >= count) return false;
         out = values[index]; return true;
@@ -911,10 +1028,12 @@ public:
         else if (index == quality_320k) command_switch_quality(data, "320k");
         else if (index == quality_flac) command_switch_quality(data, "flac");
         else if (index == quality_flac24) command_switch_quality(data, "flac24bit");
+        else if (index == copy_link) command_copy_link(data);
     }
     bool context_get_display(unsigned index, metadb_handle_list_cref data, pfc::string_base& out,
         unsigned& flags, const GUID& caller) override {
         if (data.get_count() == 0) return false;
+        if (index == copy_link && (data.get_count() != 1 || !has_kind(data, false))) return false;
         bool navigation_only = true;
         for (t_size i = 0; i < data.get_count(); ++i) {
             std::string encoded;
@@ -923,7 +1042,15 @@ public:
                 if (!uri_to_payload(data[i]->get_path(), encoded, &payload) || !payload.is_navigation()) navigation_only = false;
             } catch (...) { navigation_only = false; }
         }
-        if (navigation_only) return false;
+        if (navigation_only) {
+            SearchPage page;
+            if (index == download && download_search_context(data, page)) {
+                out = "下载所有搜索结果页…";
+                flags = 0;
+                return true;
+            }
+            return false;
+        }
         if (index == lyrics && has_kind(data, true) && !has_kind(data, false)) return false;
         if (index == expand && !has_kind(data, true)) return false;
         if (index == download && has_albums(data)) {

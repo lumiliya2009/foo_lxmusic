@@ -35,10 +35,32 @@ namespace LxMusic.Bridge.Online
         {
             UpdateChecker.ValidatePackage(update);
             ValidateTarget(componentDirectory);
-            var response = OnlineHttp.Execute(update.PackageUrl, timeoutMs: 60000,
-                maxBytes: UpdateChecker.MaxPackageBytes, useSystemProxy: true);
-            if (!response.Ok) throw new IOException("下载安装包失败（HTTP " + response.StatusCode + "），原版本未改动");
-            return PrepareDownloaded(update, response.BodyBytes, updatesDirectory, componentDirectory, host, parentId);
+            var bytes = DownloadPackage(update);
+            return PrepareDownloaded(update, bytes, updatesDirectory, componentDirectory, host, parentId);
+        }
+
+        public static byte[] DownloadPackage(ComponentUpdate update, Func<string, bool, byte[]> fetch = null)
+        {
+            UpdateChecker.ValidatePackage(update);
+            foreach (var direct in new[] { false, true })
+            {
+                try
+                {
+                    byte[] bytes;
+                    if (fetch != null) bytes = fetch(update.PackageUrl, direct);
+                    else
+                    {
+                        var response = OnlineHttp.Execute(update.PackageUrl, timeoutMs: 30000,
+                            maxBytes: UpdateChecker.MaxPackageBytes, useSystemProxy: true, forceDirect: direct);
+                        if (!response.Ok) continue;
+                        bytes = response.BodyBytes;
+                    }
+                    if (bytes != null && bytes.LongLength == update.Size && string.Equals(
+                        "sha256:" + Hash(bytes), update.Sha256, StringComparison.OrdinalIgnoreCase)) return bytes;
+                }
+                catch { }
+            }
+            throw new IOException("下载安装包或校验失败，请检查网络后重试，原版本未改动");
         }
 
         public static string PrepareDownloaded(ComponentUpdate update, byte[] bytes, string updatesDirectory,

@@ -81,7 +81,8 @@ namespace LxMusic.Bridge.Online
             int maxBytes = DefaultMaxBytes,
             int followMax = MaxRedirects,
             OnlineHttpRequestHandle handle = null,
-            bool useSystemProxy = false)
+            bool useSystemProxy = false,
+            bool forceDirect = false)
         {
             var currentUrl = ValidatePublicHttpUrl(url);
             var currentMethod = string.IsNullOrWhiteSpace(method) ? "GET" : method.ToUpperInvariant();
@@ -97,7 +98,7 @@ namespace LxMusic.Bridge.Online
                 // request on machines with a stale local proxy. Catalog calls
                 // use the direct fast path, but all imported-script requests
                 // must honor the system proxy, including provider domains.
-                if (!useSystemProxy && IsKnownMusicHost(new Uri(currentUrl).Host)) request.Proxy = null;
+                if (forceDirect || (!useSystemProxy && IsKnownMusicHost(new Uri(currentUrl).Host))) request.Proxy = null;
                 request.AllowAutoRedirect = false;
                 request.Method = currentMethod;
                 request.Timeout = Math.Max(2000, Math.Min(60000, timeoutMs));

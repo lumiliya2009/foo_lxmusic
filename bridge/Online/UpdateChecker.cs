@@ -1,6 +1,9 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
 namespace LxMusic.Bridge.Online
@@ -21,14 +24,52 @@ namespace LxMusic.Bridge.Online
         private const string Releases = "https://github.com/lumiliya2009/foo_lxmusic/releases/tag/";
         private const string Downloads = "https://github.com/lumiliya2009/foo_lxmusic/releases/download/";
         public const int MaxPackageBytes = 32 * 1024 * 1024;
+        private static readonly string[] Feeds = {
+            "https://api.github.com/repos/lumiliya2009/foo_lxmusic/releases/latest",
+            "https://raw.githubusercontent.com/lumiliya2009/foo_lxmusic/main/update.json",
+            "https://cdn.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json"
+        };
 
-        public static ComponentUpdate Check(string current, string architecture = null)
+        public static ComponentUpdate Check(string current, string architecture = null,
+            Func<string, bool, string> fetch = null)
         {
-            var response = OnlineHttp.Execute("https://api.github.com/repos/lumiliya2009/foo_lxmusic/releases/latest",
-                timeoutMs: 15000, maxBytes: 1024 * 1024);
-            if (!response.Ok) throw new InvalidOperationException("检查更新失败（HTTP " + response.StatusCode + "），请稍后重试");
-            return Parse(response.Body, current, architecture);
+            if (ParseVersion(current) == null) throw new InvalidOperationException("当前版本号无法识别");
+            if (architecture != null) PackageName("v0.0.0", architecture);
+            var handles = Enumerable.Range(0, Feeds.Length * 2).Select(_ => new OnlineHttpRequestHandle()).ToArray();
+            // Try the user's proxy and direct route independently. A dead local
+            // proxy or a blocked API must not prevent the other feeds working.
+            var tasks = handles.Select((handle, index) => Task.Factory.StartNew(() =>
+            {
+                try
+                {
+                    var url = Feeds[index / 2]; var direct = index % 2 == 1;
+                    string json;
+                    if (fetch != null) json = fetch(url, direct);
+                    else
+                    {
+                        var response = OnlineHttp.Execute(url, timeoutMs: 8000, maxBytes: 1024 * 1024,
+                            handle: handle, useSystemProxy: true, forceDirect: direct);
+                        if (!response.Ok) return null;
+                        json = response.Body;
+                    }
+                    return new FeedResult { Update = Parse(json, current, architecture) };
+                }
+                catch { return null; }
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+            try
+            {
+                Task.WaitAll(tasks, 18000);
+                var valid = tasks.Where(task => task.Status == TaskStatus.RanToCompletion)
+                    .Select(task => task.Result).Where(result => result != null).ToArray();
+                if (valid.Length == 0) throw new IOException("检查更新失败：所有更新通道均不可用，请检查网络后重试");
+                // CDN caches can lag behind GitHub. Compare every valid result.
+                return valid.Where(result => result.Update != null).Select(result => result.Update)
+                    .OrderByDescending(update => ParseVersion(update.Version)).FirstOrDefault();
+            }
+            finally { foreach (var handle in handles) handle.Cancel(); }
         }
+
+        private sealed class FeedResult { internal ComponentUpdate Update; }
 
         public static ComponentUpdate Parse(string json, string current, string architecture = null)
         {

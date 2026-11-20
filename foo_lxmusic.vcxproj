@@ -80,6 +80,7 @@
   </ItemGroup>
   <ItemGroup><ResourceCompile Include="foo_lxmusic.rc" /></ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\libPPUI\libPPUI.vcxproj"><Project>{7729EB82-4069-4414-964B-AD399091A03F}</Project></ProjectReference>
     <ProjectReference Include="..\..\pfc\pfc.vcxproj"><Project>{EBFFFB4E-261D-44D3-B89C-957B31A0BF9C}</Project></ProjectReference>
     <ProjectReference Include="..\foobar2000_component_client\foobar2000_component_client.vcxproj"><Project>{71AD2674-065B-48F5-B8B0-E1F9D3892081}</Project></ProjectReference>
     <ProjectReference Include="..\helpers\foobar2000_sdk_helpers.vcxproj"><Project>{EE47764E-A202-4F85-A767-ABDAB4AFF35F}</Project></ProjectReference>
