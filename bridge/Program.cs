@@ -17,6 +17,7 @@ namespace LxMusic.Bridge.Online
         private static int Main(string[] args)
         {
             Console.OutputEncoding = new UTF8Encoding(false);
+            if (args.Length == 1 && args[0] == "apply-update") return UpdateInstaller.RunHelper();
             try
             {
                 if (args.Length < 2) throw new InvalidOperationException("缺少命令或数据目录");
@@ -33,6 +34,7 @@ namespace LxMusic.Bridge.Online
                         case "source-options": SourceOptions(store); break;
                         case "select-source": store.Select(args.Length > 2 ? args[2] : string.Empty); Status(store); break;
                         case "check-update": CheckUpdate(args); break;
+                        case "prepare-update": PrepareUpdate(args); break;
                         case "import-file": ImportFile(repository.Value, ArgText(args, 2)); break;
                         case "import-url": ImportUrl(repository.Value, ArgText(args, 2)); break;
                         case "remove-source": repository.Value.ResetSource(args.Length > 2 ? args[2] : null); Ok("已删除音源"); break;
@@ -91,9 +93,18 @@ namespace LxMusic.Bridge.Online
         private static void CheckUpdate(string[] args)
         {
             if (args.Length < 3) throw new InvalidOperationException("缺少当前版本号");
-            var update = UpdateChecker.Check(args[2]);
+            var update = UpdateChecker.Check(args[2], args.Length > 3 ? args[3] : null);
             if (update == null) Ok("当前已是最新版本（" + args[2] + "）");
-            else Emit("UPDATE", PayloadCodec.EncodeText(update.Url), update.Version);
+            else Emit("UPDATE", PayloadCodec.EncodeText(update.Url), update.Version,
+                PayloadCodec.EncodeText(JsonConvert.SerializeObject(update)));
+        }
+
+        private static void PrepareUpdate(string[] args)
+        {
+            if (args.Length != 6 || !int.TryParse(args[5], out var parent)) throw new InvalidOperationException("更新参数无效");
+            var update = JsonConvert.DeserializeObject<ComponentUpdate>(ArgText(args, 2));
+            var stage = UpdateInstaller.Prepare(update, AppPaths.File("updates"), ArgText(args, 3), ArgText(args, 4), parent);
+            Emit("READY", PayloadCodec.EncodeText(stage));
         }
 
         private static void ImportFile(OnlineMusicRepository repository, string path)

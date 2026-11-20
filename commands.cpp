@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include <cstring>
+#include <atomic>
 
 namespace lxmusic {
 
@@ -20,6 +21,8 @@ struct page_request {
     bool owned = false;
 };
 std::vector<std::weak_ptr<page_request>> g_page_requests;
+std::atomic_bool g_update_pending{ false };
+struct update_guard { ~update_guard() { g_update_pending = false; } };
 
 bool owns_search_page(t_size playlist, const std::string& state) {
     pfc::array_t<uint8_t> data;
@@ -519,17 +522,48 @@ void command_manage_sources() {
 }
 
 void command_check_update() {
+    if (g_update_pending.exchange(true)) {
+        popup_message::g_show("正在检查或下载安装包，请稍候。", "LX 在线音乐");
+        return;
+    }
+    const auto pending = std::make_shared<update_guard>();
     run_task("检查更新",
-        [](async_state& state, threaded_process_status&, abort_callback& abort) { state.result = run_bridge({ "check-update", kVersion }, abort); },
-        [](async_state& state) {
+        [pending](async_state& state, threaded_process_status&, abort_callback& abort) {
+            state.result = run_bridge({ "check-update", kVersion, sizeof(void*) == 8 ? "x64" : "x86" }, abort);
+        },
+        [pending](async_state& state) {
             for (const auto& line : state.result.lines) {
-                if (line.fields.size() >= 2 && line.fields[0] == "UPDATE") {
-                    const auto url = base64url_decode(line.fields[1]);
-                    if (url.rfind("https://github.com/lumiliya2009/foo_lxmusic/releases/tag/", 0) != 0)
-                        throw std::runtime_error("更新地址无效");
-                    const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(core_api::get_main_window(), L"open",
-                        pfc::stringcvt::string_wide_from_utf8(url.c_str()), nullptr, nullptr, SW_SHOWNORMAL));
-                    if (result <= 32) throw std::runtime_error("无法打开浏览器，请访问项目的 GitHub 发布页");
+                if (line.fields.size() >= 4 && line.fields[0] == "UPDATE") {
+                    const auto message = "发现新版本 " + line.fields[2] + "。\n\n是否下载并安装？下载校验完成后将自动重启 foobar2000。";
+                    if (MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
+                        L"LX 在线音乐更新", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
+                    std::vector<wchar_t> host(32768);
+                    const auto length = GetModuleFileNameW(nullptr, host.data(), static_cast<DWORD>(host.size()));
+                    if (length == 0 || length >= host.size()) throw std::runtime_error("无法获取播放器路径");
+                    const std::string host_path = pfc::stringcvt::string_utf8_from_wide(host.data());
+                    const auto metadata = line.fields[3];
+                    const auto target = base64url_encode_text(component_directory());
+                    const auto executable = base64url_encode_text(host_path);
+                    const auto parent = std::to_string(GetCurrentProcessId());
+                    run_task("下载安装包",
+                        [pending, metadata, target, executable, parent](async_state& download, threaded_process_status&, abort_callback& abort) {
+                            download.result = run_bridge({ "prepare-update", metadata, target, executable, parent }, abort);
+                        },
+                        [pending](async_state& download) {
+                            for (const auto& record : download.result.lines) {
+                                if (record.fields.size() == 2 && record.fields[0] == "READY") {
+                                    if (!standard_commands::main_exit()) {
+                                        const auto cancel = base64url_decode(record.fields[1]) + "\\cancel";
+                                        const auto marker = CreateFileW(pfc::stringcvt::string_wide_from_utf8(cancel.c_str()),
+                                            GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                                        if (marker != INVALID_HANDLE_VALUE) CloseHandle(marker);
+                                        throw std::runtime_error("无法退出播放器，本次更新未安装");
+                                    }
+                                    return;
+                                }
+                            }
+                            throw std::runtime_error("更新助手未就绪，原版本未改动");
+                        });
                     return;
                 }
             }

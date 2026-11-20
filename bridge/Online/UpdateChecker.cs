@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 
 namespace LxMusic.Bridge.Online
@@ -7,21 +9,28 @@ namespace LxMusic.Bridge.Online
     {
         public string Version { get; set; }
         public string Url { get; set; }
+        public string Architecture { get; set; }
+        public string PackageName { get; set; }
+        public string PackageUrl { get; set; }
+        public string Sha256 { get; set; }
+        public long Size { get; set; }
     }
 
     public static class UpdateChecker
     {
         private const string Releases = "https://github.com/lumiliya2009/foo_lxmusic/releases/tag/";
+        private const string Downloads = "https://github.com/lumiliya2009/foo_lxmusic/releases/download/";
+        public const int MaxPackageBytes = 32 * 1024 * 1024;
 
-        public static ComponentUpdate Check(string current)
+        public static ComponentUpdate Check(string current, string architecture = null)
         {
             var response = OnlineHttp.Execute("https://api.github.com/repos/lumiliya2009/foo_lxmusic/releases/latest",
                 timeoutMs: 15000, maxBytes: 1024 * 1024);
             if (!response.Ok) throw new InvalidOperationException("检查更新失败（HTTP " + response.StatusCode + "），请稍后重试");
-            return Parse(response.Body, current);
+            return Parse(response.Body, current, architecture);
         }
 
-        public static ComponentUpdate Parse(string json, string current)
+        public static ComponentUpdate Parse(string json, string current, string architecture = null)
         {
             var root = JObject.Parse(json);
             if (root.Value<bool?>("draft") == true || root.Value<bool?>("prerelease") == true) return null;
@@ -33,11 +42,45 @@ namespace LxMusic.Bridge.Online
             var url = root.Value<string>("html_url") ?? string.Empty;
             if (url != Releases + tag || !Uri.IsWellFormedUriString(url, UriKind.Absolute))
                 throw new InvalidOperationException("更新地址不属于本项目的 GitHub 发布页");
-            return new ComponentUpdate { Version = tag, Url = url };
+            var update = new ComponentUpdate { Version = tag, Url = url };
+            if (architecture == null) return update;
+            update.Architecture = architecture;
+            update.PackageName = PackageName(tag, architecture);
+            var assets = (root["assets"] as JArray ?? new JArray()).OfType<JObject>()
+                .Where(asset => asset.Value<string>("name") == update.PackageName).ToArray();
+            if (assets.Length != 1 || assets[0].Value<string>("state") != "uploaded")
+                throw new InvalidOperationException("发布页缺少当前播放器对应的安装包，请稍后重试");
+            var selected = assets[0];
+            update.PackageUrl = selected.Value<string>("browser_download_url");
+            update.Sha256 = selected.Value<string>("digest");
+            update.Size = selected.Value<long?>("size") ?? 0;
+            ValidatePackage(update);
+            return update;
+        }
+
+        public static string PackageName(string tag, string architecture)
+        {
+            if (tag == null || !Regex.IsMatch(tag, @"\Av?\d+\.\d+\.\d+(?:\.\d+)?\z") || ParseVersion(tag) == null)
+                throw new InvalidOperationException("更新版本号无效");
+            var suffix = architecture == "x86" ? "fb1-x86" : architecture == "x64" ? "fb2-x64" : null;
+            if (suffix == null) throw new InvalidOperationException("不支持的播放器架构");
+            return "foo_lxmusic-" + tag.TrimStart('v') + "-" + suffix + ".fb2k-component";
+        }
+
+        public static void ValidatePackage(ComponentUpdate update)
+        {
+            if (update == null || update.PackageName != PackageName(update.Version, update.Architecture) ||
+                update.Url != Releases + update.Version ||
+                update.PackageUrl != Downloads + update.Version + "/" + update.PackageName)
+                throw new InvalidOperationException("更新安装包地址无效");
+            if (update.Size < 1 || update.Size > MaxPackageBytes || update.Sha256 == null ||
+                !Regex.IsMatch(update.Sha256, @"\Asha256:[0-9a-fA-F]{64}\z"))
+                throw new InvalidOperationException("更新安装包缺少有效的大小或 SHA256 校验信息");
         }
 
         private static Version ParseVersion(string text)
         {
+            if (string.IsNullOrWhiteSpace(text)) return null;
             if (text.StartsWith("v", StringComparison.OrdinalIgnoreCase)) text = text.Substring(1);
             if (!Version.TryParse(text, out var version)) return null;
             return new Version(version.Major, version.Minor, Math.Max(0, version.Build), Math.Max(0, version.Revision));

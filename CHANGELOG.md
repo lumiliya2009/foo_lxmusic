@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8
+
+- Add search pagination and page jumps in result lists.
+- Save search history and keep multiple result lists.
+- Download updates from GitHub and install them on restart, with package verification and rollback.
+
 ## 0.1.7
 
 - Save multiple sources, switch them in search, and list supported searchable platforms.
