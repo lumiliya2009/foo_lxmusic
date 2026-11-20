@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -46,11 +45,10 @@ namespace LxMusic.Bridge.Online
             return new OnlineAlbumDownload { Album = album, Tracks = tracks, DirectoryPath = folder };
         }
 
-        internal string TrackFileName(int index, ResolvedOnlineMedia media)
+        internal string TrackFileName(int index, ResolvedOnlineMedia media, string namingTemplate = null)
         {
-            var digits = Math.Max(2, Tracks.Count.ToString(CultureInfo.InvariantCulture).Length);
-            var number = (index + 1).ToString("D" + digits, CultureInfo.InvariantCulture);
-            return number + " - " + SafeName(Tracks[index].Title) + "." + OnlineDownloader.FileExtension(media.Url, media.MimeType);
+            return DownloadFileNaming.BuildFileName(namingTemplate ?? DownloadFileNaming.AlbumTemplate,
+                Tracks[index], media, index + 1, Tracks.Count);
         }
 
         internal string SaveArtwork(Func<string, byte[]> fetch = null)

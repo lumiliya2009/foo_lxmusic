@@ -1,6 +1,7 @@
 // Deterministic bridge for isolated host UI regression checks only.
 // Never include this executable in a component package.
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -37,6 +38,24 @@ static class BridgeFixture
         string command = args[0];
         string id = command == "resolve" || command == "expand" ? Field(args[2], 5) : "";
         File.AppendAllText(Path.Combine(Root, "requests.log"), command + "\t" + id + Environment.NewLine);
+        if (command == "download-name-preview")
+        {
+            // Use the production formatter; this fixture still avoids source/network access.
+            var start = new ProcessStartInfo(Path.Combine(Root, "real-bridge", "foo_lx_bridge.exe"), string.Join(" ", args))
+                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8 };
+            using (var process = Process.Start(start))
+            {
+                Console.Write(process.StandardOutput.ReadToEnd());
+                process.WaitForExit();
+                return process.ExitCode;
+            }
+        }
+        if (command == "download-batch")
+        {
+            File.WriteAllText(Path.Combine(Root, "download-template.txt"), Decode(args[5]));
+            Console.WriteLine("DONE\t0\t0\t" + Encode("测试下载设置已保存，未下载音频。"));
+            return 0;
+        }
         if (command == "source-options")
         {
             Console.WriteLine("SOURCE\t11111111111111111111111111111111\t" + Encode("测试音源一") + "\t1");

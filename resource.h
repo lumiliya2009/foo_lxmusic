@@ -27,6 +27,8 @@
 #define IDC_LX_DOWNLOAD_ITEMS     1011
 #define IDC_LX_SELECT_ALL         1012
 #define IDC_LX_SELECT_NONE        1013
+#define IDC_LX_DOWNLOAD_NAMING    1014
+#define IDC_LX_DOWNLOAD_PREVIEW   1015
 
 #ifndef IDC_STATIC
 #define IDC_STATIC -1

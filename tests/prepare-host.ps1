@@ -12,6 +12,11 @@ foreach ($name in @('foo_ui_std.dll', 'foo_input_std.dll')) {
 }
 [IO.File]::WriteAllText((Join-Path $testRoot 'portable_mode_enabled'), '')
 Copy-Item -LiteralPath (Join-Path $project "build\$Platform\Release\foo_lxmusic.dll") -Destination $component -Force
+$previewBridge = Join-Path $component 'real-bridge'
+New-Item -ItemType Directory -Path $previewBridge -Force | Out-Null
+Get-ChildItem -LiteralPath (Join-Path $project 'bridge/bin/Release/net48') -File | Where-Object {
+    $_.Extension -in '.exe', '.dll', '.config'
+} | Copy-Item -Destination $previewBridge -Force
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
 & $compiler /nologo /target:exe "/out:$component\foo_lx_bridge.exe" (Join-Path $PSScriptRoot 'BridgeFixture.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Fixture compilation failed' }

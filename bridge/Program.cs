@@ -24,6 +24,13 @@ namespace LxMusic.Bridge.Online
                 var command = args[0].Trim().ToLowerInvariant();
                 AppPaths.Initialize(PayloadCodec.DecodeText(args[1]));
 
+                if (command == "download-name-preview")
+                {
+                    if (args.Length != 4) throw new InvalidOperationException("命名预览参数不完整");
+                    Emit("NAME", PayloadCodec.EncodeText(DownloadFileNaming.Preview(ArgText(args, 2), OnlineQuality.FromId(args[3]))));
+                    return 0;
+                }
+
                 var store = new OnlineSourceStore();
                 var accounts = new OnlineAccountStore();
                 using (var repository = new RepositoryScope(new OnlineMusicRepository(store, accounts)))
@@ -248,6 +255,8 @@ namespace LxMusic.Bridge.Online
             var listPath = PayloadCodec.DecodeText(args[2]);
             var outputDirectory = PayloadCodec.DecodeText(args[3]);
             var quality = OnlineQuality.FromId(args[4]) ?? OnlineQuality.High;
+            var namingTemplate = args.Length > 5 ? ArgText(args, 5) : null;
+            if (namingTemplate != null) DownloadFileNaming.ValidateTemplate(namingTemplate);
             var payloads = File.ReadAllLines(listPath, Encoding.UTF8).Where(line => !string.IsNullOrWhiteSpace(line)).ToList();
             if (payloads.Count == 0) throw new InvalidOperationException("没有可下载的歌曲或专辑");
 
@@ -291,14 +300,18 @@ namespace LxMusic.Bridge.Online
             }
             var ok = 0;
             var failedTracks = 0;
+            var looseTotal = jobs.Count(job => job.Album == null);
+            var looseNumber = 0;
             for (var index = 0; index < jobs.Count; index++)
             {
                 var job = jobs[index];
                 var track = job.Track;
+                if (job.Album == null) looseNumber++;
                 try
                 {
                     var media = repository.Resolve(track, quality);
-                    var wantedName = job.Album == null ? OnlineDownloader.BuildFileName(track, media) : job.Album.TrackFileName(job.AlbumIndex, media);
+                    var wantedName = job.Album == null ? OnlineDownloader.BuildFileName(track, media, namingTemplate, looseNumber, looseTotal)
+                        : job.Album.TrackFileName(job.AlbumIndex, media, namingTemplate);
                     var fileName = UniqueFileName(job.Directory, wantedName);
                     var lastReport = DateTime.MinValue;
                     Emit("STATUS", PayloadCodec.EncodeText("正在下载 " + (index + 1) + "/" + jobs.Count + "：" + track));

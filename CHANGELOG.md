@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.9
+
+- Choose or customize download filenames with a preview and saved preferences.
+
 ## 0.1.8
 
 - Add search pagination and page jumps in result lists.

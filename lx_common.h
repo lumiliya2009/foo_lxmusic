@@ -4,7 +4,7 @@ namespace lxmusic {
 
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 constexpr const char* kSchemeSuffix = ".lxmusic";
-constexpr const char* kVersion = "0.1.8";
+constexpr const char* kVersion = "0.1.9";
 
 enum PayloadField : size_t {
     pf_version = 0,
@@ -120,7 +120,7 @@ bool show_page_dialog(const SearchPage& state, int& page);
 SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected);
 bool show_url_dialog(std::string& url);
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics);
-bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality);
+bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality, std::string& naming_template);
 
 void command_search();
 void command_search_page(t_size playlist, t_size item);

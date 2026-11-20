@@ -4,12 +4,14 @@
 
 ## 下载
 
-- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.8/foo_lxmusic-0.1.8-fb1-x86.fb2k-component)
-- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.8/foo_lxmusic-0.1.8-fb2-x64.fb2k-component)
+- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.9/foo_lxmusic-0.1.9-fb1-x86.fb2k-component)
+- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.9/foo_lxmusic-0.1.9-fb2-x64.fb2k-component)
 
 ## 使用
 
 安装后重启，在“文件 → LX 在线音乐 → 管理音源”导入脚本，搜索时选择音源和站点。回车打开或播放，退格返回上一层，右键下载。
+
+下载前可选择或编辑文件命名，例如 `{序号} - {曲名} - {艺术家}`，也支持 `{专辑名}`、`{音质}`。下方显示示例，设置自动记住；同名文件加后缀保留。
 
 列表末尾可翻页、到尾页或输入页码跳转。搜索框保存最近 20 条记录，直接输入覆盖旧文字；多次搜索保留独立结果列表。
 

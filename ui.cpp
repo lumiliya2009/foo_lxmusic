@@ -11,6 +11,7 @@ cfg_string g_download_folder({ 0x628a3da4, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0
 cfg_string g_download_quality({ 0x628a3da5, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "flac");
 cfg_string g_search_site_id({ 0x628a3da6, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 cfg_string g_search_history({ 0x628a3da7, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
+cfg_string g_download_naming({ 0x628a3da8, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "{序号} - {曲名} - {艺术家}");
 
 std::string dialog_text(HWND dialog, UINT id) {
     pfc::string8 value;
@@ -319,10 +320,16 @@ public:
     std::vector<std::string> payloads;
     std::string folder;
     std::string quality = "320k";
+    std::string naming_template;
 
     BEGIN_MSG_MAP(download_dialog)
         MSG_WM_INITDIALOG(OnInitDialog)
+        MSG_WM_DESTROY(OnDestroy)
+        MSG_WM_TIMER(OnTimer)
         COMMAND_HANDLER(IDC_LX_BROWSE, BN_CLICKED, OnBrowse)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_NAMING, CBN_EDITCHANGE, OnNamingChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_NAMING, CBN_SELCHANGE, OnNamingChanged)
+        COMMAND_HANDLER(IDC_LX_DOWNLOAD_QUALITY, CBN_SELCHANGE, OnNamingChanged)
         COMMAND_HANDLER(IDC_LX_SELECT_ALL, BN_CLICKED, OnSelectAll)
         COMMAND_HANDLER(IDC_LX_SELECT_NONE, BN_CLICKED, OnSelectNone)
         COMMAND_ID_HANDLER(IDOK, OnOK)
@@ -346,6 +353,20 @@ public:
         else if (quality == "flac") quality_index = 2;
         else if (quality == "flac24bit" || quality == "hires") quality_index = 3;
         combo.SetCurSel(quality_index);
+
+        auto naming = CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_NAMING));
+        naming.LimitText(256);
+        static const wchar_t* templates[] = {
+            L"{序号} - {曲名} - {艺术家}", L"{序号} - {曲名}", L"{曲名} - {艺术家}",
+            L"{艺术家} - {曲名}", L"{曲名}", L"{专辑名} - {序号} - {曲名}",
+            L"{序号} - {曲名} - {艺术家} - {音质}"
+        };
+        for (const auto value : templates) naming.AddString(value);
+        const pfc::stringcvt::string_wide_from_utf8 saved(naming_template.c_str());
+        if (naming.FindStringExact(-1, saved) == CB_ERR) naming.AddString(saved);
+        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_NAMING, naming_template.c_str());
+        preview->window = m_hWnd;
+        SchedulePreview();
 
         INITCOMMONCONTROLSEX common_controls{ sizeof(common_controls), ICC_LISTVIEW_CLASSES };
         InitCommonControlsEx(&common_controls);
@@ -382,6 +403,44 @@ public:
     LRESULT OnSelectAll(WORD, WORD, HWND, BOOL&) { SetAllChecks(true); return 0; }
     LRESULT OnSelectNone(WORD, WORD, HWND, BOOL&) { SetAllChecks(false); return 0; }
 
+    void OnDestroy() {
+        KillTimer(preview_timer);
+        preview->window = nullptr;
+        ++preview->generation;
+    }
+
+    LRESULT OnNamingChanged(WORD, WORD, HWND, BOOL&) { SchedulePreview(); return 0; }
+
+    void OnTimer(UINT_PTR id) {
+        if (id != preview_timer) return;
+        KillTimer(preview_timer);
+        const auto state = preview;
+        const auto generation = state->generation;
+        const auto pattern = dialog_text(*this, IDC_LX_DOWNLOAD_NAMING);
+        if (pattern.empty()) {
+            uSetDlgItemText(*this, IDC_LX_DOWNLOAD_PREVIEW, "请输入文件命名格式");
+            return;
+        }
+        const auto selected_quality = SelectedQuality();
+        fb2k::splitTask([state, generation, pattern, selected_quality] {
+            std::string message;
+            bool valid = false;
+            try {
+                const auto result = run_bridge({ "download-name-preview", base64url_encode_text(pattern), selected_quality }, fb2k::noAbort);
+                message = bridge_message(result, "NAME");
+                valid = !message.empty();
+                if (!valid) message = "未能生成文件名示例";
+            } catch (const std::exception& ex) { message = ex.what(); }
+            catch (...) { message = "未能生成文件名示例"; }
+            fb2k::inMainThread([state, generation, message, valid] {
+                if (!state->window || state->generation != generation) return;
+                state->valid = valid;
+                uSetDlgItemText(state->window, IDC_LX_DOWNLOAD_PREVIEW, message.c_str());
+                ::EnableWindow(::GetDlgItem(state->window, IDOK), valid ? TRUE : FALSE);
+            });
+        });
+    }
+
     LRESULT OnBrowse(WORD, WORD, HWND, BOOL&) {
         BROWSEINFOW info{};
         info.hwndOwner = *this;
@@ -401,13 +460,14 @@ public:
     }
 
     LRESULT OnOK(WORD, WORD, HWND, BOOL&) {
+        if (!preview->valid) { GetDlgItem(IDC_LX_DOWNLOAD_NAMING).SetFocus(); return 0; }
         folder = dialog_text(*this, IDC_LX_FOLDER);
         if (folder.empty()) {
             MessageBoxW(L"请选择下载目录。", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
             return 0;
         }
-        static const char* values[] = { "128k", "320k", "flac", "flac24bit" };
-        quality = values[std::clamp(CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_QUALITY)).GetCurSel(), 0, 3)];
+        quality = SelectedQuality();
+        naming_template = dialog_text(*this, IDC_LX_DOWNLOAD_NAMING);
 
         std::vector<std::string> checked;
         const auto list = GetDlgItem(IDC_LX_DOWNLOAD_ITEMS).m_hWnd;
@@ -424,6 +484,25 @@ public:
     }
     LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
 private:
+    static constexpr UINT_PTR preview_timer = 21;
+    struct preview_state { HWND window = nullptr; size_t generation = 0; bool valid = false; };
+    std::shared_ptr<preview_state> preview = std::make_shared<preview_state>();
+
+    std::string SelectedQuality() {
+        static const char* values[] = { "128k", "320k", "flac", "flac24bit" };
+        return values[std::clamp(CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_QUALITY)).GetCurSel(), 0, 3)];
+    }
+
+    void SchedulePreview() {
+        if (!preview->window) return;
+        ++preview->generation;
+        preview->valid = false;
+        GetDlgItem(IDOK).EnableWindow(FALSE);
+        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_PREVIEW, "正在生成示例…");
+        KillTimer(preview_timer);
+        SetTimer(preview_timer, 250);
+    }
+
     void SetAllChecks(bool checked) {
         const auto list = GetDlgItem(IDC_LX_DOWNLOAD_ITEMS).m_hWnd;
         for (int index = 0, count = ListView_GetItemCount(list); index < count; ++index)
@@ -473,16 +552,19 @@ void show_lyrics_dialog(const std::string& caption, const std::string& lyrics) {
     dialog.DoModal(core_api::get_main_window());
 }
 
-bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality) {
+bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality, std::string& naming_template) {
     download_dialog dialog;
     dialog.payloads = payloads;
     dialog.folder = folder.empty() ? std::string(g_download_folder.get().c_str()) : folder;
     dialog.quality = quality.empty() ? std::string(g_download_quality.get().c_str()) : quality;
+    dialog.naming_template = naming_template.empty() ? std::string(g_download_naming.get().c_str()) : naming_template;
     if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
     folder = dialog.folder;
     quality = dialog.quality;
+    naming_template = dialog.naming_template;
     g_download_folder = folder.c_str();
     g_download_quality = quality.c_str();
+    g_download_naming = naming_template.c_str();
     payloads = std::move(dialog.payloads);
     return true;
 }

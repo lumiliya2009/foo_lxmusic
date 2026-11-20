@@ -9,8 +9,10 @@ namespace LxMusic.Bridge.Online
     /// <summary>在线音乐下载（支持进度与取消）。</summary>
     public static class OnlineDownloader
     {
-        public static string BuildFileName(OnlineTrack track, ResolvedOnlineMedia resolved)
+        public static string BuildFileName(OnlineTrack track, ResolvedOnlineMedia resolved,
+            string namingTemplate = null, int number = 1, int total = 1)
         {
+            if (namingTemplate != null) return DownloadFileNaming.BuildFileName(namingTemplate, track, resolved, number, total);
             var qualityLabel = string.IsNullOrWhiteSpace(resolved?.SourceQuality) ? resolved?.Quality?.Label : resolved.SourceQuality;
             var stem = TextUtil.SanitizeFileName(string.Join(" - ", new[]
             {

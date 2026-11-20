@@ -677,8 +677,8 @@ void command_download(metadb_handle_list_cref items) {
         return;
     }
 
-    std::string last_folder, quality;
-    if (!show_download_dialog(payloads, last_folder, quality)) return;
+    std::string last_folder, quality, naming_template;
+    if (!show_download_dialog(payloads, last_folder, quality, naming_template)) return;
     std::string request_file;
     try { request_file = write_payload_file(payloads); }
     catch (const std::exception& ex) { popup_message::g_complain("无法创建下载任务", ex); return; }
@@ -687,13 +687,13 @@ void command_download(metadb_handle_list_cref items) {
     auto state = std::make_shared<async_state>();
     auto task = threaded_process_callback_lambda::create(
         threaded_process_callback_lambda::on_init_t{},
-        [state, request_file, output, quality](threaded_process_status& status, abort_callback& abort) {
+        [state, request_file, output, quality, naming_template](threaded_process_status& status, abort_callback& abort) {
             status.set_item("正在读取下载项目…");
             status.set_progress(0);
             status.set_progress_secondary(0);
             try {
                 state->result = run_bridge({ "download-batch", base64url_encode_text(request_file),
-                    base64url_encode_text(output), quality }, abort,
+                    base64url_encode_text(output), quality, base64url_encode_text(naming_template) }, abort,
                     [&status](const BridgeLine& line) { update_download_progress(status, line); });
             } catch (const exception_aborted&) {
                 delete_utf8_file(request_file);

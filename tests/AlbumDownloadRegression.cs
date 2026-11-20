@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -30,6 +31,106 @@ static class AlbumDownloadRegression
         Tracks = Enumerable.Range(first, count).Select(Track).ToList(), HasNext = more
     };
     static OnlineAlbumDownload Prepare(OnlineCollection album) => OnlineAlbumDownload.Prepare(album, root, (_, __) => Page(1, 2));
+
+    static void TestNaming()
+    {
+        var track = new OnlineTrack { Title = "李香兰", Artist = "张学友", Album = "梦中的你" };
+        var media = new ResolvedOnlineMedia { Url = "https://media.invalid/audio.flac", Quality = OnlineQuality.Lossless, SourceQuality = "flac" };
+        Func<string, string> name = template => DownloadFileNaming.BuildFileName(template, track, media, 1, 12);
+        Check(name(DownloadFileNaming.DefaultTemplate) == "01 - 李香兰 - 张学友.flac", "default custom filename wrong");
+        Check(name("{曲名} - {艺术家}") == "李香兰 - 张学友.flac", "title/artist order wrong");
+        Check(name("{艺术家} - {文件名}") == "张学友 - 李香兰.flac", "filename alias wrong");
+        Check(name("{专辑名}_{序号}_{曲名}_{音质}") == "梦中的你_01_李香兰_flac.flac", "custom separators or fields lost");
+        Check(name("收藏 [{序号}] {曲名}") == "收藏 [01] 李香兰.flac", "literal prefix changed");
+        Check(DownloadFileNaming.BuildFileName("{序号}", track, media, 102, 102) == "102.flac", "number width not expanded");
+        Check(DownloadFileNaming.BuildFileName("{序号}", track, media, 1, 102) == "001.flac", "numbers not padded to total width");
+        Check(OnlineDownloader.BuildFileName(track, media, "{曲名}", 1, 1) == "李香兰.flac", "single-track naming not wired");
+        var album = Prepare(Album());
+        Check(album.TrackFileName(1, media, "{专辑名} - {序号} - {曲名}") == "测试专辑 - 02 - 曲目2.flac", "album naming not wired");
+        Check(Prepare(Album("另一专辑")).TrackFileName(0, media, "{序号} {曲名}") == "01 曲目1.flac", "album numbering did not restart");
+        track.Title = "{艺术家} 曲名";
+        Check(name("{曲名}") == "{艺术家} 曲名.flac", "metadata was expanded as a second template");
+        track.Title = "../CON:test\\song?\n";
+        var safe = name("{曲名}");
+        Check(Path.GetFileName(safe) == safe && safe.IndexOfAny(Path.GetInvalidFileNameChars()) < 0, "unsafe metadata became a path");
+        Check(Path.GetFullPath(Path.Combine(root, safe)).StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "filename escaped download root");
+        foreach (var reserved in new[] { "CON", "nul", "AUX.wav", "COM1", "LPT³" })
+        {
+            track.Title = reserved;
+            Check(name("{曲名}").StartsWith("_"), "reserved Windows name accepted: " + reserved);
+        }
+        track.Title = new string('歌', 119) + "😀尾";
+        var shortened = Path.GetFileNameWithoutExtension(name("{曲名}"));
+        Check(shortened.Length <= 120 && !char.IsHighSurrogate(shortened.Last()), "filename truncation split an emoji");
+        track.Title = null; track.Artist = " "; track.Album = null;
+        Check(name("{曲名} - {艺术家} - {专辑名}") == "未命名歌曲 - 未知艺术家 - 未知专辑.flac", "missing metadata produced an empty name");
+        foreach (var invalid in new[] { "", " ", "{未知字段}", "{曲名", "曲名}", "{{曲名}}", new string('x', 257) })
+            Fails(() => DownloadFileNaming.ValidateTemplate(invalid), "invalid template accepted");
+        Fails(() => DownloadFileNaming.BuildFileName("{序号}", track, media, 0, 2), "zero sequence accepted");
+        Check(DownloadFileNaming.Preview("{序号}-{曲名}", OnlineQuality.Lossless) == "01-示例歌曲.flac", "FLAC preview wrong");
+        Check(DownloadFileNaming.Preview("{曲名}", OnlineQuality.High).EndsWith(".mp3"), "MP3 preview wrong");
+    }
+
+    static string Encode(string text) => Convert.ToBase64String(Encoding.UTF8.GetBytes(text)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    static string Decode(string text) { text = text.Replace('-', '+').Replace('_', '/'); return Encoding.UTF8.GetString(Convert.FromBase64String(text.PadRight((text.Length + 3) / 4 * 4, '='))); }
+    static string[][] Bridge(string profile, int expectedExit, params string[] args)
+    {
+        var command = new[] { args[0], Encode(profile) }.Concat(args.Skip(1));
+        var start = new ProcessStartInfo(typeof(OnlineMusicRepository).Assembly.Location, string.Join(" ", command))
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+        };
+        using (var process = Process.Start(start))
+        {
+            var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(20000)) { process.Kill(); throw new Exception("download bridge test timed out"); }
+            Check(process.ExitCode == expectedExit && error.Result.Length == 0, "unexpected bridge result: " + output.Result + error.Result);
+            return output.Result.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(line => line.Split('\t')).ToArray();
+        }
+    }
+
+    static void TestNamingBridge()
+    {
+        var profile = Path.Combine(root, "naming-profile");
+        var preview = Bridge(profile, 0, "download-name-preview", Encode("{序号} - {曲名} - {艺术家}"), "flac");
+        Check(preview.Length == 1 && preview[0][0] == "NAME" && Decode(preview[0][1]) == "01 - 示例歌曲 - 示例艺术家.flac", "preview protocol wrong");
+        Check(!File.Exists(Path.Combine(profile, "online-source.json")), "preview required or created a source");
+        var badPreview = Bridge(profile, 1, "download-name-preview", Encode("{unknown}"), "flac");
+        Check(badPreview[0][0] == "ERROR" && Decode(badPreview[0][1]).Contains("命名字段"), "invalid preview lacks useful error");
+        var directory = Path.Combine(root, "named-transfers");
+        Bridge(profile, 1, "download-batch", Encode("missing-list"), Encode(directory), "flac", Encode("{unknown}"));
+        Check(!Directory.Exists(directory), "invalid template created download directory");
+        var script = Path.Combine(profile, "download-test.js");
+        File.WriteAllText(script, @"
+lx.on(lx.EVENT_NAMES.request, async ({info}) => {
+  if (info.musicInfo.songId === 'fail') throw new Error('fixture failure');
+  return info.musicInfo.fixtureUrl;
+});
+lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['flac']}}});
+", new UTF8Encoding(false));
+        Bridge(profile, 0, "import-file", Encode(script));
+        var bytes = Encoding.ASCII.GetBytes("fLaC_named_transfer_fixture");
+        using (var server = new Server(bytes))
+        {
+            Func<string, string> payload = id => {
+                var fields = new[] { "1", "track", "qq", "tx", "fixture", id, "曲名:二", "歌手/甲", "测试专辑", "1000", "", "flac",
+                    "{\"songId\":\"" + id + "\",\"fixtureUrl\":\"" + server.Url + "\"}", "flac", "" };
+                return Encode(string.Concat(fields.Select(value => Encoding.UTF8.GetByteCount(value) + ":" + value)));
+            };
+            var list = Path.Combine(profile, "downloads.txt");
+            File.WriteAllLines(list, new[] { payload("fail"), payload("ok"), payload("ok") });
+            Directory.CreateDirectory(directory);
+            var original = Path.Combine(directory, "02 - 曲名_二 - 歌手_甲.flac");
+            File.WriteAllText(original, "keep");
+            var result = Bridge(profile, 0, "download-batch", Encode(list), Encode(directory), "flac", Encode(DownloadFileNaming.DefaultTemplate));
+            var done = result.Single(line => line[0] == "DONE");
+            Check(done[1] == "1" && done[2] == "1", "batch deduplication or failure count wrong");
+            Check(File.ReadAllText(original) == "keep", "custom naming overwrote an existing file");
+            Check(File.ReadAllBytes(Path.Combine(directory, "02 - 曲名_二 - 歌手_甲 (2).flac")).SequenceEqual(bytes), "failed preceding track changed numbering or template lost in batch");
+            Check(Directory.GetFiles(directory).Length == 2, "extra or partial named download left behind");
+        }
+    }
 
     static void TestPlanningAndCovers()
     {
@@ -156,12 +257,19 @@ static class AlbumDownloadRegression
         try
         {
             TestPlanningAndCovers();
+            TestNaming();
+            TestNamingBridge();
             TestTransfers();
             if (args.Contains("--live")) TestLiveAlbum();
             Console.WriteLine(checks + " album/cover/download regression checks passed");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
-        finally { Directory.Delete(root, true); }
+        finally
+        {
+            var tempRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!Path.GetFullPath(root).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase)) throw new Exception("unsafe fixture cleanup path");
+            Directory.Delete(root, true);
+        }
     }
 }
