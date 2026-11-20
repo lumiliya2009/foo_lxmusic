@@ -27,7 +27,11 @@ namespace LxMusic.Bridge.Online
         private static readonly string[] Feeds = {
             "https://api.github.com/repos/lumiliya2009/foo_lxmusic/releases/latest",
             "https://raw.githubusercontent.com/lumiliya2009/foo_lxmusic/main/update.json",
-            "https://cdn.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json"
+            "https://cdn.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json",
+            // Optional provider endpoints, used only as additional fallbacks.
+            // Their availability is not guaranteed by jsDelivr.
+            "https://fastly.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json",
+            "https://gcore.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json"
         };
 
         public static ComponentUpdate Check(string current, string architecture = null,

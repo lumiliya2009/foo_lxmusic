@@ -102,7 +102,7 @@ static class UpdateRegression
         var bytes = Package();
         var current = Release(bytes).ToString();
         var newer = current.Replace("0.1.8", "0.1.10");
-        foreach (var feed in new[] { "api.github.com", "raw.githubusercontent.com", "cdn.jsdelivr.net" })
+        foreach (var feed in new[] { "api.github.com", "raw.githubusercontent.com", "cdn.jsdelivr.net", "fastly.jsdelivr.net", "gcore.jsdelivr.net" })
         foreach (var directRoute in new[] { false, true })
         {
             var attempts = 0;
@@ -111,7 +111,7 @@ static class UpdateRegression
                 if (new Uri(url).Host != feed || direct != directRoute) throw new IOException("offline route");
                 return current;
             });
-            Check(result?.Version == "v0.1.8" && attempts == 6, "fallback failed: " + feed + "/" + directRoute);
+            Check(result?.Version == "v0.1.8" && attempts == 10, "fallback failed: " + feed + "/" + directRoute);
         }
         var latest = UpdateChecker.Check("0.1.7", "x86", (url, direct) => {
             if (url.Contains("api.github")) { Thread.Sleep(80); return newer; }
@@ -263,7 +263,7 @@ while (!File.Exists(Path.Combine(root, ""exit""))) Thread.Sleep(50);
         {
             Directory.CreateDirectory(Root);
             TestMetadata(); TestFallbacks(); TestPackages(); TestInstall(); TestHelper(false); TestHelper(true);
-            if (args.Contains("--live"))
+            if (args.Contains("--live") || args.Contains("--live-check-only"))
             {
                 var proxy = args.FirstOrDefault(arg => arg.StartsWith("--proxy=", StringComparison.Ordinal));
                 if (proxy != null) System.Net.WebRequest.DefaultWebProxy = new System.Net.WebProxy(proxy.Substring(8));
@@ -271,8 +271,12 @@ while (!File.Exists(Path.Combine(root, ""exit""))) Thread.Sleep(50);
                 {
                     var update = UpdateChecker.Check("0.1.6", architecture);
                     Check(update != null, "live release missing");
-                    TestHelper(false, update);
-                    Console.WriteLine("Verified live download/install: " + update.Version + " " + architecture);
+                    if (args.Contains("--live-check-only")) Console.WriteLine("Verified live update check: " + update.Version + " " + architecture);
+                    else
+                    {
+                        TestHelper(false, update);
+                        Console.WriteLine("Verified live download/install: " + update.Version + " " + architecture);
+                    }
                 }
             }
             Console.WriteLine("PASS: " + checks + " updater checks; staged helper, rollback, cancellation and restart verified");
