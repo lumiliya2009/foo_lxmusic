@@ -84,7 +84,7 @@ namespace LxMusic.Bridge.Online
                     TextUtil.HtmlDecode(item.Value<string>("ALBUM")), item.Value<string>("ALBUMID"),
                     (item.Value<long?>("DURATION") ?? 0) * 1000, image, qualities));
             }
-            return Page(tracks, page, limit, root.Value<int?>("TOTAL") ?? tracks.Count);
+            return new OnlineSearchPage { Tracks = tracks }.WithPagination(page, limit, root.Value<int?>("TOTAL"), list.Count);
         }
 
         public static OnlineSearchPage ParseMigu(string json, int page, int limit)
@@ -126,7 +126,7 @@ namespace LxMusic.Bridge.Online
                 track.MusicInfoJson = info.ToString(Formatting.None);
                 tracks.Add(track);
             }
-            return Page(tracks, page, limit, result.Value<int?>("totalCount") ?? tracks.Count);
+            return new OnlineSearchPage { Tracks = tracks }.WithPagination(page, limit, result.Value<int?>("totalCount"), tracks.Count);
         }
 
         private static OnlineTrack Track(OnlinePlatform platform, string id, string title, string artist, string album,
@@ -146,7 +146,5 @@ namespace LxMusic.Bridge.Online
                 DurationMs = Math.Max(0, duration), ArtworkUrl = image, AvailableQualities = qualities, MusicInfoJson = info.ToString(Formatting.None) };
         }
 
-        private static OnlineSearchPage Page(List<OnlineTrack> tracks, int page, int limit, int total) =>
-            new OnlineSearchPage { Tracks = tracks, Page = page, Total = total, HasNext = (long)page * limit < total };
     }
 }

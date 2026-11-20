@@ -48,8 +48,12 @@ static class BridgeFixture
         else if (command == "check-update") Emit("OK", "当前已是最新版本（测试）");
         else if (command == "search")
         {
-            Console.WriteLine("ITEM\t" + Item(args[3], "first", "回车测试结果一"));
-            Console.WriteLine("ITEM\t" + Item(args[3], "second", "回车测试结果二"));
+            int page = int.Parse(args[5]);
+            if (page <= 3) {
+                Console.WriteLine("ITEM\t" + Item(args[3], page + "-first", "第" + page + "页结果一"));
+                Console.WriteLine("ITEM\t" + Item(args[3], page + "-second", "第" + page + "页结果二"));
+            }
+            Console.WriteLine("PAGE\t" + page + "\t30\t3\t62\t" + (page < 3 ? "1" : "0"));
         }
         else if (command == "expand")
         {

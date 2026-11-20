@@ -137,12 +137,40 @@ namespace LxMusic.Bridge.Online
             string.IsNullOrWhiteSpace(Artist) ? Title : Artist + " - " + Title;
     }
 
-    public sealed class OnlineSearchPage
+    public class OnlinePage
     {
-        public List<OnlineTrack> Tracks { get; set; } = new List<OnlineTrack>();
         public int Page { get; set; } = 1;
         public bool HasNext { get; set; }
         public int Total { get; set; }
+        public bool TotalKnown { get; set; }
+        public int? TotalPages { get; set; }
+    }
+
+    public static class SearchPagination
+    {
+        public static T WithPagination<T>(this T result, int page, int limit, int? total, int count,
+            bool? hasNext = null, int? pages = null) where T : OnlinePage
+        {
+            result.Page = Math.Max(1, page);
+            limit = Math.Max(1, limit);
+            var offset = (long)(result.Page - 1) * limit;
+            result.TotalKnown = total.HasValue && total >= 0 && (count == 0 || total >= offset + count);
+            result.Total = result.TotalKnown ? total.Value : 0;
+            result.TotalPages = pages > 0 && (count == 0 || pages >= result.Page) ? pages :
+                result.TotalKnown ? (int?)Math.Max(1, ((long)result.Total + limit - 1) / limit) : null;
+            result.HasNext = hasNext ?? (result.TotalPages.HasValue ? result.Page < result.TotalPages : count >= limit);
+            if (result.TotalPages.HasValue && result.HasNext != (result.Page < result.TotalPages))
+            {
+                result.TotalPages = null;
+                result.TotalKnown = false;
+            }
+            return result;
+        }
+    }
+
+    public sealed class OnlineSearchPage : OnlinePage
+    {
+        public List<OnlineTrack> Tracks { get; set; } = new List<OnlineTrack>();
     }
 
     /// <summary>搜索类型：单曲 / 专辑 / 在线歌单 / 榜单 / 歌手。</summary>
@@ -179,12 +207,9 @@ namespace LxMusic.Bridge.Online
     }
 
     /// <summary>专辑 / 歌单类型的搜索结果页。</summary>
-    public sealed class OnlineCollectionPage
+    public sealed class OnlineCollectionPage : OnlinePage
     {
         public List<OnlineCollection> Collections { get; set; } = new List<OnlineCollection>();
-        public int Page { get; set; } = 1;
-        public bool HasNext { get; set; }
-        public int Total { get; set; }
     }
 
     public enum OnlineCollectionKind

@@ -331,7 +331,16 @@ int main() {
         require(test_host::decoder_prefix == test_host::stream_bytes.substr(0, 16), "decoder did not receive byte zero");
         ++count;
         const int quality_count = test_quality_and_info();
-        std::cout << playback_count << " playback, " << count - playback_count << " stream, and " << quality_count << " quality/info regression cases passed\n";
+        for (const auto flags : {0u, input_flag_playback}) {
+            test_host::reset(test_host::failure::resolve);
+            test_host::navigation = true;
+            abort_callback navigation_abort;
+            input_lxmusic navigation_input;
+            require(decode_operation(navigation_input, navigation_abort, flags) == "eof", "navigation row did not end without playback");
+            navigation_input.decode_seek(0, navigation_abort);
+            require(test_host::resolve_calls == 0 && test_host::stops == 0 && test_host::popup_text.empty(), "navigation row caused playback activity");
+        }
+        std::cout << playback_count << " playback, " << count - playback_count << " stream, " << quality_count << " quality/info, and 2 navigation regression cases passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAILED: " << error.what() << '\n';

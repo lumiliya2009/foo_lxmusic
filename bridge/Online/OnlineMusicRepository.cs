@@ -197,8 +197,8 @@ namespace LxMusic.Bridge.Online
             if (root.Value<int?>("code") != 0) throw new InvalidOperationException("QQ音乐搜索失败");
             var list = root.SelectToken("data.song.list") as JArray ?? new JArray();
             var tracks = list.OfType<JObject>().Select(ParseQqTrack).Where(t => t != null).ToList();
-            var total = root.SelectToken("data.song.totalnum")?.Value<int>() ?? tracks.Count;
-            return new OnlineSearchPage { Tracks = tracks, Page = safePage, HasNext = (long)safePage * safeLimit < total, Total = total };
+            var total = root.SelectToken("data.song.totalnum")?.Value<int>();
+            return new OnlineSearchPage { Tracks = tracks }.WithPagination(safePage, safeLimit, total, list.Count);
         }
 
         private static OnlineSearchPage SearchKugou(string query, int page, int limit)
@@ -227,8 +227,8 @@ namespace LxMusic.Bridge.Online
                 var track = ParseKugouTrack(item);
                 if (track != null && seen.Add(track.Id)) tracks.Add(track);
             }
-            var total = root.SelectToken("data.total")?.Value<int>() ?? tracks.Count;
-            return new OnlineSearchPage { Tracks = tracks, Page = safePage, HasNext = (long)safePage * safeLimit < total, Total = total };
+            var total = root.SelectToken("data.total")?.Value<int>();
+            return new OnlineSearchPage { Tracks = tracks }.WithPagination(safePage, safeLimit, total, list.Count);
         }
 
         private static OnlineSearchPage SearchNetease(string query, int page, int limit)
@@ -249,8 +249,8 @@ namespace LxMusic.Bridge.Online
             if (root.Value<int?>("code") != 200) throw new InvalidOperationException("网易云音乐搜索失败");
             var list = root.SelectToken("result.songs") as JArray ?? new JArray();
             var tracks = list.OfType<JObject>().Select(ParseNeteaseTrack).Where(t => t != null).ToList();
-            var total = root.SelectToken("result.songCount")?.Value<int>() ?? tracks.Count;
-            return new OnlineSearchPage { Tracks = tracks, Page = safePage, HasNext = (long)safePage * safeLimit < total, Total = total };
+            var total = root.SelectToken("result.songCount")?.Value<int>();
+            return new OnlineSearchPage { Tracks = tracks }.WithPagination(safePage, safeLimit, total, list.Count);
         }
         // ----------------------------------------------------------------- 音质与解析
 
@@ -740,19 +740,10 @@ namespace LxMusic.Bridge.Online
             var allPage = NativeInt(root, new[] { "allPage", "allPages", "maxPage", "pages" });
             var total = NativeInt(root, new[] { "total", "totalCount", "songCount", "count" });
             var isEnd = NativeBool(root, new[] { "isEnd", "end", "is_end" });
-            bool hasNext;
+            var hasNext = NativeBool(root, new[] { "hasNext", "hasMore", "has_next", "more" });
             if (isEnd.HasValue) hasNext = !isEnd.Value;
-            else if (allPage.HasValue) hasNext = safePage < allPage.Value;
-            else if (total.HasValue && total.Value > 0) hasNext = (long)safePage * safeLimit < total.Value;
-            else hasNext = list.Count >= safeLimit;
-
-            return new OnlineSearchPage
-            {
-                Tracks = tracks,
-                Page = safePage,
-                HasNext = hasNext,
-                Total = total ?? (tracks.Count < safeLimit ? tracks.Count : 0)
-            };
+            return new OnlineSearchPage { Tracks = tracks }
+                .WithPagination(safePage, safeLimit, total, list.Count, hasNext, allPage);
         }
 
         private static JToken SafeParseToken(string json)

@@ -88,6 +88,7 @@ namespace test_host {
 enum class failure { none, resolve, empty_url, open, initialize, run, seek, cancelled };
 inline failure fail = failure::none;
 inline bool collection = false;
+inline bool navigation = false;
 inline int resolve_calls = 0, stops = 0;
 inline std::string popup_title, popup_text;
 inline std::string stream_bytes, stream_mime, decoder_mime, decoder_prefix;
@@ -109,7 +110,7 @@ inline void check_failure(failure at) {
     if (fail == at) throw std::runtime_error("fixture failure " + std::to_string(static_cast<int>(at)));
 }
 inline void reset(failure mode) {
-    fail = mode; collection = false; resolve_calls = stops = 0;
+    fail = mode; collection = navigation = false; resolve_calls = stops = 0;
     popup_title.clear(); popup_text.clear(); callbacks.clear(); playback_abort = nullptr;
     stream_bytes = "fLaC_fixture_audio_payload"; stream_mime = "audio/x-ogg";
     decoder_mime.clear(); decoder_prefix.clear(); stream_seekable = true; stream_read_limit = SIZE_MAX;
@@ -210,7 +211,8 @@ namespace lxmusic {
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 enum { pf_preferred_quality, pf_title, pf_artist };
 struct Payload {
-    bool is_track() const { return !test_host::collection; }
+    bool is_track() const { return !test_host::collection && !test_host::navigation; }
+    bool is_navigation() const { return test_host::navigation; }
     const std::string& get(int index) const {
         static const std::string values[] = { "flac", "测试歌曲", "测试歌手" };
         return values[index];

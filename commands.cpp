@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include <cstring>
 
 namespace lxmusic {
 
@@ -8,7 +9,31 @@ struct async_state {
     BridgeResult result;
     std::vector<std::string> items;
     std::string error;
+    SearchPage page;
 };
+
+const GUID guid_search_page = { 0x85d64b46, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+struct page_request {
+    playlist_position_reference_tracker position;
+    metadb_handle_ptr control;
+    std::string original_state;
+    bool owned = false;
+};
+std::vector<std::weak_ptr<page_request>> g_page_requests;
+
+bool owns_search_page(t_size playlist, const std::string& state) {
+    pfc::array_t<uint8_t> data;
+    if (!playlist_manager_v2::get()->playlist_get_property(playlist, guid_search_page, data) || data.get_size() != state.size()) return false;
+    return !state.empty() && std::memcmp(data.get_ptr(), state.data(), state.size()) == 0;
+}
+
+void mark_search_page(t_size playlist, const SearchPage& page) {
+    const auto state = encode_search_state(page);
+    pfc::array_t<uint8_t> data;
+    data.set_size(state.size());
+    std::memcpy(data.get_ptr(), state.data(), state.size());
+    playlist_manager_v2::get()->playlist_set_property(playlist, guid_search_page, data);
+}
 
 struct quality_resume_state {
     metadb_handle_ptr target;
@@ -129,6 +154,43 @@ std::string site_label(const std::string& site) {
     if (site == "migu") return "咪咕音乐";
     if (site == "qishui") return "汽水音乐";
     return site;
+}
+
+std::string search_playlist_name(const SearchOptions& options) {
+    return "LX " + site_label(options.site) + " " + type_label(options.type) + " - " + options.keyword;
+}
+
+void fetch_search_page(async_state& state, const SearchOptions& options, int page, abort_callback& abort,
+    const SearchPage* previous = nullptr, bool last = false) {
+    const auto read = [&](int number) {
+        abort.check();
+        auto result = run_bridge({ "search", options.site, options.type, base64url_encode_text(options.keyword),
+            std::to_string(number), "30", options.quality, options.source }, abort);
+        auto items = bridge_items(result);
+        if (items.empty()) return false;
+        state.page = search_page_from_bridge(result, options, number);
+        state.result = std::move(result);
+        state.items = std::move(items);
+        return true;
+    };
+    if (last && previous) {
+        const auto actual = find_last_search_page(previous->page, page, read);
+        if ((state.items.empty() || state.page.page != actual) && !read(actual))
+            throw std::runtime_error("站点没有返回可用的搜索结果，原列表已保留");
+        if (actual < page) { state.page.total_pages = actual; state.page.total_items = -1; state.page.has_next = false; }
+    } else if (!read(page)) throw std::runtime_error("第 " + std::to_string(page) + " 页没有搜索结果，原列表已保留");
+    if (previous && previous->total_pages >= state.page.page && state.page.total_pages > previous->total_pages) {
+        state.page.total_pages = previous->total_pages;
+        state.page.total_items = -1;
+        state.page.has_next = state.page.page < state.page.total_pages;
+    }
+    append_search_controls(state.items, state.page);
+}
+
+void show_new_search(async_state& state) {
+    const auto index = add_payloads_to_playlist(state.items, search_playlist_name(state.page.options), pfc_infinite, true);
+    mark_search_page(index, state.page);
+    remember_search(state.page.options);
 }
 
 std::vector<SourceOption> source_options(const BridgeResult& result) {
@@ -367,16 +429,61 @@ void command_search() {
             }
             SearchOptions options;
             if (!show_search_dialog(options, sources)) return;
-            const auto playlist = "LX " + site_label(options.site) + " " + type_label(options.type) + " - " + options.keyword;
             run_task("LX 在线音乐搜索",
                 [options](async_state& search, threaded_process_status&, abort_callback& abort) {
-                    search.result = run_bridge({ "search", options.site, options.type,
-                        base64url_encode_text(options.keyword), "1", "30", options.quality, options.source }, abort);
-                    search.items = bridge_items(search.result);
-                    if (search.items.empty()) throw std::runtime_error("没有找到匹配结果");
+                    fetch_search_page(search, options, 1, abort);
                 },
-                [playlist](async_state& search) { add_payloads_to_playlist(search.items, playlist); }, true);
+                [](async_state& search) { show_new_search(search); }, true);
         });
+}
+
+void command_search_page(t_size playlist, t_size item) {
+    try {
+        auto playlists = playlist_manager::get();
+        metadb_handle_ptr control;
+        if (!playlists->playlist_get_item_handle(control, playlist, item)) return;
+        std::string encoded;
+        Payload payload;
+        if (!uri_to_payload(control->get_path(), encoded, &payload) || !payload.is_navigation()) return;
+        const auto page = decode_search_state(payload.get(pf_music_info_json));
+        g_page_requests.erase(std::remove_if(g_page_requests.begin(), g_page_requests.end(), [](const auto& entry) { return entry.expired(); }), g_page_requests.end());
+        for (const auto& entry : g_page_requests)
+            if (const auto pending = entry.lock()) if (pending->position.m_playlist == playlist) return;
+        int requested = page.page;
+        const bool last = payload.get(pf_id) == "last";
+        if (last) {
+            if (page.total_pages < 1) throw std::runtime_error("音源没有返回总页数");
+            requested = page.total_pages;
+        } else if (payload.get(pf_id) == "jump") {
+            if (!show_page_dialog(page, requested)) return;
+        } else if (!parse_search_page_number(payload.get(pf_id), page.total_pages, requested))
+            throw std::runtime_error("页码无效");
+        if (requested == page.page) return;
+        auto request = std::make_shared<page_request>();
+        request->position.m_playlist = playlist;
+        request->position.m_item = item;
+        request->control = control;
+        request->original_state = payload.get(pf_music_info_json);
+        request->owned = owns_search_page(playlist, request->original_state);
+        g_page_requests.push_back(request);
+        run_task("搜索结果翻页",
+            [page, requested, last](async_state& state, threaded_process_status&, abort_callback& abort) {
+                fetch_search_page(state, page.options, requested, abort, &page, last);
+            },
+            [request](async_state& state) {
+                auto playlists = playlist_manager::get();
+                const auto target = request->position.m_playlist;
+                const auto row = request->position.m_item;
+                metadb_handle_ptr current;
+                if (target == pfc_infinite || row == pfc_infinite ||
+                    !playlists->playlist_get_item_handle(current, target, row) || current != request->control) return;
+                if (!request->owned) { show_new_search(state); return; }
+                if (!owns_search_page(target, request->original_state)) return;
+                replace_playlist_payloads(state.items, target, playlists->get_active_playlist() == target);
+                mark_search_page(target, state.page);
+                remember_search(state.page.options);
+            }, true);
+    } catch (const std::exception& ex) { popup_message::g_complain("搜索结果翻页失败", ex.what()); }
 }
 
 void command_manage_sources() {
@@ -774,6 +881,15 @@ public:
     bool context_get_display(unsigned index, metadb_handle_list_cref data, pfc::string_base& out,
         unsigned& flags, const GUID& caller) override {
         if (data.get_count() == 0) return false;
+        bool navigation_only = true;
+        for (t_size i = 0; i < data.get_count(); ++i) {
+            std::string encoded;
+            Payload payload;
+            try {
+                if (!uri_to_payload(data[i]->get_path(), encoded, &payload) || !payload.is_navigation()) navigation_only = false;
+            } catch (...) { navigation_only = false; }
+        }
+        if (navigation_only) return false;
         if (index == lyrics && has_kind(data, true) && !has_kind(data, false)) return false;
         if (index == expand && !has_kind(data, true)) return false;
         if (index == download && has_albums(data)) {

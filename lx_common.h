@@ -31,6 +31,7 @@ struct Payload {
     const std::string& get(size_t index) const;
     bool is_track() const;
     bool is_collection() const;
+    bool is_navigation() const;
 };
 
 struct BridgeLine {
@@ -52,6 +53,23 @@ struct SearchOptions {
     std::string type;
     std::string quality;
 };
+
+struct SearchPage {
+    SearchOptions options;
+    int page = 1, limit = 30, total_pages = -1, total_items = -1;
+    bool has_next = false;
+};
+
+std::string encode_search_state(const SearchPage& page);
+SearchPage decode_search_state(const std::string& encoded);
+SearchPage search_page_from_bridge(const BridgeResult& result, const SearchOptions& options, int requested);
+std::string search_page_label(const SearchPage& page);
+void append_search_controls(std::vector<std::string>& items, const SearchPage& page);
+bool parse_search_page_number(const std::string& text, int maximum, int& page);
+int find_last_search_page(int current, int advertised, const std::function<bool(int)>& has_items);
+std::vector<SearchOptions> decode_search_history(const std::string& data);
+std::string update_search_history(const std::string& data, const SearchOptions& options);
+void remember_search(const SearchOptions& options);
 
 struct SourceSite { std::string id, label; bool collections = false, searchable = true; };
 struct SourceOption {
@@ -84,7 +102,8 @@ std::string bridge_error(const BridgeResult& result);
 file::ptr open_audio_stream(const std::string& url, abort_callback& abort);
 
 t_size add_payloads_to_playlist(const std::vector<std::string>& payloads, const std::string& playlist_name,
-    t_size preserve_playlist = pfc_infinite);
+    t_size preserve_playlist = pfc_infinite, bool create_new = false);
+void replace_playlist_payloads(const std::vector<std::string>& payloads, t_size playlist, bool activate = true);
 struct NavigationOrigin;
 std::shared_ptr<NavigationOrigin> capture_navigation_origin(metadb_handle_list_cref items);
 void add_expanded_payloads(const std::vector<std::string>& payloads, const std::string& playlist_name,
@@ -97,12 +116,14 @@ std::string payload_for_handle(metadb_handle_ptr handle);
 std::string lyric_payload_for_handle(metadb_handle_ptr handle);
 
 bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources);
+bool show_page_dialog(const SearchPage& state, int& page);
 SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected);
 bool show_url_dialog(std::string& url);
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics);
 bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality);
 
 void command_search();
+void command_search_page(t_size playlist, t_size item);
 void command_import_file();
 void command_import_url();
 void command_remove_source();

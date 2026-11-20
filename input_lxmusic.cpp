@@ -37,6 +37,9 @@ public:
     }
 
     void initialize(abort_callback& abort) {
+        // Playlist navigation rows are empty inputs, so sequential playback
+        // skips them without resolving a URL, changing pages or showing an error.
+        if (m_payload.is_navigation()) { abort.check(); m_decoder.release(); m_info_pending = false; return; }
         if (!m_payload.is_track()) throw exception_io_data("请选中专辑、歌手或歌单后按回车打开，再选择歌曲播放。");
         m_quality = m_payload.get(lxmusic::pf_preferred_quality).empty()
             ? std::string("flac") : m_payload.get(lxmusic::pf_preferred_quality);
@@ -44,6 +47,7 @@ public:
     }
 
     bool decode_run(audio_chunk& chunk, abort_callback& abort) {
+        if (m_payload.is_navigation()) { abort.check(); return false; }
         try {
             for (;;) {
                 try {
@@ -71,6 +75,7 @@ public:
     }
 
     void decode_seek(double seconds, abort_callback& abort) {
+        if (m_payload.is_navigation()) { abort.check(); return; }
         try {
             try {
                 m_decoder->seek(seconds, abort);

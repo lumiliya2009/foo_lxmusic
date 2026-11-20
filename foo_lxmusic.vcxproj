@@ -69,6 +69,7 @@
     <ClCompile Include="input_lxmusic.cpp" />
     <ClCompile Include="media_stream.cpp" />
     <ClCompile Include="playlist_actions.cpp" />
+    <ClCompile Include="search_state.cpp" />
     <ClCompile Include="ui.cpp" />
     <ClCompile Include="commands.cpp" />
   </ItemGroup>

@@ -92,15 +92,9 @@ namespace LxMusic.Bridge.Online
                 });
             }
             var total = albums
-                ? container.Value<int?>("totalnum") ?? result.Count
-                : data.Value<int?>("sum") ?? result.Count;
-            return new OnlineCollectionPage
-            {
-                Collections = result,
-                Page = safePage,
-                HasNext = (long)safePage * safeLimit < total,
-                Total = total
-            };
+                ? container.Value<int?>("totalnum")
+                : data.Value<int?>("sum");
+            return new OnlineCollectionPage { Collections = result }.WithPagination(safePage, safeLimit, total, list.Count);
         }
 
         private static OnlineCollectionPage SearchNetease(OnlineSearchType type, string query, int page, int limit)
@@ -141,14 +135,8 @@ namespace LxMusic.Bridge.Online
                     TrackCount = PositiveCount(item, "trackCount", "track_count", "songCount", "song_count")
                 });
             }
-            var total = result.Value<int?>(albums ? "albumCount" : "playlistCount") ?? collections.Count;
-            return new OnlineCollectionPage
-            {
-                Collections = collections,
-                Page = safePage,
-                HasNext = (long)safePage * safeLimit < total,
-                Total = total
-            };
+            var total = result.Value<int?>(albums ? "albumCount" : "playlistCount");
+            return new OnlineCollectionPage { Collections = collections }.WithPagination(safePage, safeLimit, total, list.Count);
         }
 
         private static OnlineCollectionPage SearchKugou(OnlineSearchType type, string query, int page, int limit)
@@ -186,14 +174,8 @@ namespace LxMusic.Bridge.Online
                     TrackCount = PositiveCount(item, "song_count", "songcount", "track_count", "count")
                 });
             }
-            var total = data.Value<int?>("total") ?? collections.Count;
-            return new OnlineCollectionPage
-            {
-                Collections = collections,
-                Page = safePage,
-                HasNext = (long)safePage * safeLimit < total,
-                Total = total
-            };
+            var total = data.Value<int?>("total");
+            return new OnlineCollectionPage { Collections = collections }.WithPagination(safePage, safeLimit, total, list.Count);
         }
 
         // ------------------------------------------------------------- 曲目

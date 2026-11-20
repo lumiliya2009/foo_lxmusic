@@ -10,6 +10,7 @@ cfg_string g_search_keyword({ 0x628a3da3, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x
 cfg_string g_download_folder({ 0x628a3da4, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 cfg_string g_download_quality({ 0x628a3da5, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "flac");
 cfg_string g_search_site_id({ 0x628a3da6, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
+cfg_string g_search_history({ 0x628a3da7, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 
 std::string dialog_text(HWND dialog, UINT id) {
     pfc::string8 value;
@@ -23,11 +24,17 @@ public:
     SearchOptions options;
     std::vector<SourceOption> sources;
     std::string preferred_site;
+    std::vector<SearchOptions> history;
+    int pending_history = -1;
 
     BEGIN_MSG_MAP(search_dialog)
         MSG_WM_INITDIALOG(OnInitDialog)
         COMMAND_HANDLER(IDC_LX_SOURCE, CBN_SELCHANGE, OnSourceChanged)
         COMMAND_HANDLER(IDC_LX_SITE, CBN_SELCHANGE, OnSiteChanged)
+        COMMAND_HANDLER(IDC_LX_KEYWORD, CBN_SELENDOK, OnHistoryChosen)
+        COMMAND_HANDLER(IDC_LX_KEYWORD, CBN_SETFOCUS, OnKeywordFocus)
+        MESSAGE_HANDLER(WM_APP + 17, OnSelectKeyword)
+        MESSAGE_HANDLER(WM_APP + 18, OnApplyHistory)
         COMMAND_ID_HANDLER(IDOK, OnOK)
         COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
     END_MSG_MAP()
@@ -43,8 +50,19 @@ public:
         source.SetCurSel(selected);
         FillSites();
 
+        history = decode_search_history(g_search_history.get().c_str());
+        auto keyword = CComboBox(GetDlgItem(IDC_LX_KEYWORD));
+        keyword.LimitText(1024);
+        for (const auto& entry : history) {
+            std::string label = entry.site;
+            for (const auto& saved_source : sources) for (const auto& site : saved_source.sites)
+                if (site.id == entry.site) label = site.label;
+            label = entry.keyword + "（" + label + " / " +
+                (entry.type == "album" ? "专辑" : entry.type == "artist" ? "歌手" : entry.type == "playlist" ? "歌单" : "单曲") + "）";
+            keyword.AddString(pfc::stringcvt::string_wide_from_utf8(label.c_str()));
+        }
         uSetDlgItemText(*this, IDC_LX_KEYWORD, g_search_keyword.get().c_str());
-        CEdit(GetDlgItem(IDC_LX_KEYWORD)).SetSel(0, -1);
+        keyword.SetEditSel(0, -1);
         GetDlgItem(IDC_LX_KEYWORD).SetFocus();
         return FALSE;
     }
@@ -99,7 +117,36 @@ public:
         FillTypes(); return 0;
     }
 
+    LRESULT OnKeywordFocus(WORD, WORD, HWND, BOOL&) { PostMessage(WM_APP + 17); return 0; }
+    LRESULT OnSelectKeyword(UINT, WPARAM, LPARAM, BOOL&) {
+        const auto keyword = GetDlgItem(IDC_LX_KEYWORD);
+        if (::GetFocus() == keyword || ::IsChild(keyword, ::GetFocus())) CComboBox(keyword).SetEditSel(0, -1);
+        return 0;
+    }
+    LRESULT OnHistoryChosen(WORD, WORD, HWND, BOOL&) {
+        pending_history = CComboBox(GetDlgItem(IDC_LX_KEYWORD)).GetCurSel();
+        PostMessage(WM_APP + 18);
+        return 0;
+    }
+    LRESULT OnApplyHistory(UINT, WPARAM, LPARAM, BOOL&) {
+        const int selected = pending_history;
+        pending_history = -1;
+        if (selected < 0 || static_cast<size_t>(selected) >= history.size()) return 0;
+        const auto& entry = history[selected];
+        for (size_t i = 0; i < sources.size(); ++i)
+            if (sources[i].id == entry.source) CComboBox(GetDlgItem(IDC_LX_SOURCE)).SetCurSel(static_cast<int>(i));
+        preferred_site = entry.site;
+        FillSites();
+        const int type = entry.type == "album" ? 1 : entry.type == "artist" ? 2 : entry.type == "playlist" ? 3 : 0;
+        auto types = CComboBox(GetDlgItem(IDC_LX_TYPE));
+        types.SetCurSel(type < types.GetCount() ? type : 0);
+        uSetDlgItemText(*this, IDC_LX_KEYWORD, entry.keyword.c_str());
+        CComboBox(GetDlgItem(IDC_LX_KEYWORD)).SetEditSel(0, -1);
+        return 0;
+    }
+
     LRESULT OnOK(WORD, WORD, HWND, BOOL&) {
+        if (pending_history >= 0) { BOOL handled = FALSE; OnApplyHistory(0, 0, 0, handled); }
         options.keyword = dialog_text(*this, IDC_LX_KEYWORD);
         const auto first = options.keyword.find_first_not_of(" \t\r\n");
         options.keyword = first == std::string::npos ? std::string() :
@@ -125,6 +172,38 @@ public:
         return 0;
     }
 
+    LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
+};
+
+class page_dialog : public CDialogImpl<page_dialog> {
+public:
+    enum { IDD = IDD_LX_PAGE };
+    SearchPage state;
+    int page = 1;
+    BEGIN_MSG_MAP(page_dialog)
+        MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_ID_HANDLER(IDOK, OnOK)
+        COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
+    END_MSG_MAP()
+    BOOL OnInitDialog(CWindow, LPARAM) {
+        CenterWindow(GetParent());
+        uSetDlgItemText(*this, IDC_LX_STATUS, search_page_label(state).c_str());
+        SetDlgItemInt(IDC_LX_PAGE_NUMBER, state.page, FALSE);
+        CEdit(GetDlgItem(IDC_LX_PAGE_NUMBER)).LimitText(9);
+        CEdit(GetDlgItem(IDC_LX_PAGE_NUMBER)).SetSel(0, -1);
+        GetDlgItem(IDC_LX_PAGE_NUMBER).SetFocus();
+        return FALSE;
+    }
+    LRESULT OnOK(WORD, WORD, HWND, BOOL&) {
+        if (!parse_search_page_number(dialog_text(*this, IDC_LX_PAGE_NUMBER), state.total_pages, page)) {
+            const auto message = state.total_pages > 0 ? "请输入 1 到 " + std::to_string(state.total_pages) + " 之间的页码。" : "请输入有效的正整数页码。";
+            MessageBoxW(pfc::stringcvt::string_wide_from_utf8(message.c_str()), L"页码无效", MB_OK | MB_ICONINFORMATION);
+            CEdit(GetDlgItem(IDC_LX_PAGE_NUMBER)).SetSel(0, -1);
+            GetDlgItem(IDC_LX_PAGE_NUMBER).SetFocus();
+            return 0;
+        }
+        EndDialog(IDOK); return 0;
+    }
     LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
 };
 
@@ -360,6 +439,18 @@ bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>&
     if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
     options = dialog.options;
     return true;
+}
+
+bool show_page_dialog(const SearchPage& state, int& page) {
+    page_dialog dialog;
+    dialog.state = state;
+    if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
+    page = dialog.page;
+    return true;
+}
+
+void remember_search(const SearchOptions& options) {
+    g_search_history = update_search_history(g_search_history.get().c_str(), options).c_str();
 }
 
 SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected) {

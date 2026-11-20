@@ -7,7 +7,7 @@ namespace LxMusic.Bridge.Online
 {
     internal static class ArtistCatalog
     {
-        internal static List<OnlineCollection> Search(OnlinePlatform platform, string query, int page, int limit)
+        internal static OnlineCollectionPage Search(OnlinePlatform platform, string query, int page, int limit)
         {
             if (string.IsNullOrWhiteSpace(query)) throw new InvalidOperationException("请输入歌手名");
             if (ReferenceEquals(platform, OnlinePlatform.Qq)) return SearchQq(query, page, limit);
@@ -24,7 +24,7 @@ namespace LxMusic.Bridge.Online
             throw new InvalidOperationException("该站点暂不支持读取歌手歌曲");
         }
 
-        private static List<OnlineCollection> SearchQq(string query, int page, int limit)
+        private static OnlineCollectionPage SearchQq(string query, int page, int limit)
         {
             var root = Json(OnlineHttp.Query("https://c.y.qq.com/soso/fcgi-bin/client_search_cp", new Dictionary<string, object>
             {
@@ -32,7 +32,7 @@ namespace LxMusic.Bridge.Online
                 ["w"] = query, ["t"] = 9
             }), "https://y.qq.com/");
             var list = root.SelectToken("data.singer.list") as JArray ?? new JArray();
-            return list.OfType<JObject>().Select(item =>
+            var collections = list.OfType<JObject>().Select(item =>
             {
                 var id = Value(item, "singermid", "singerMID", "mid");
                 var name = TextUtil.HtmlDecode(Value(item, "singername", "singerName", "name"));
@@ -40,9 +40,11 @@ namespace LxMusic.Bridge.Online
                 return new OnlineCollection { Platform = OnlinePlatform.Qq, Id = id, Title = name,
                     Subtitle = "歌手", ArtworkUrl = Value(item, "singerPic", "pic"), Kind = OnlineCollectionKind.Category };
             }).Where(item => item != null).ToList();
+            return new OnlineCollectionPage { Collections = collections }
+                .WithPagination(page, limit, root.SelectToken("data.singer.totalnum")?.Value<int>(), list.Count);
         }
 
-        private static List<OnlineCollection> SearchNetease(string query, int page, int limit)
+        private static OnlineCollectionPage SearchNetease(string query, int page, int limit)
         {
             var root = Json(OnlineHttp.Query("https://music.163.com/api/cloudsearch/pc", new Dictionary<string, object>
             {
@@ -50,7 +52,7 @@ namespace LxMusic.Bridge.Online
                 ["limit"] = Math.Max(1, Math.Min(50, limit))
             }), "https://music.163.com/");
             var list = root.SelectToken("result.artists") as JArray ?? new JArray();
-            return list.OfType<JObject>().Select(item =>
+            var collections = list.OfType<JObject>().Select(item =>
             {
                 var id = Value(item, "id");
                 var name = Value(item, "name");
@@ -59,9 +61,11 @@ namespace LxMusic.Bridge.Online
                     Subtitle = "歌手", ArtworkUrl = Value(item, "picUrl", "img1v1Url"), Kind = OnlineCollectionKind.Category,
                     TrackCount = item.Value<int?>("musicSize") ?? 0 };
             }).Where(item => item != null).ToList();
+            return new OnlineCollectionPage { Collections = collections }
+                .WithPagination(page, limit, root.SelectToken("result.artistCount")?.Value<int>(), list.Count);
         }
 
-        private static List<OnlineCollection> SearchKugou(string query, int page, int limit)
+        private static OnlineCollectionPage SearchKugou(string query, int page, int limit)
         {
             var root = Json(OnlineHttp.Query("https://msearchretry.kugou.com/api/v3/search/singer", new Dictionary<string, object>
             {
@@ -69,7 +73,7 @@ namespace LxMusic.Bridge.Online
                 ["showtype"] = 10, ["version"] = 7910
             }), "https://www.kugou.com/");
             var list = root.SelectToken("data.info") as JArray ?? new JArray();
-            return list.OfType<JObject>().Select(item =>
+            var collections = list.OfType<JObject>().Select(item =>
             {
                 var id = Value(item, "singerid", "singer_id", "id");
                 var name = TextUtil.HtmlDecode(Value(item, "singername", "singer_name", "name"));
@@ -78,6 +82,8 @@ namespace LxMusic.Bridge.Online
                     Subtitle = "歌手", ArtworkUrl = Value(item, "imgurl", "image").Replace("{size}", "400"),
                     Kind = OnlineCollectionKind.Category, TrackCount = item.Value<int?>("songcount") ?? 0 };
             }).Where(item => item != null).ToList();
+            return new OnlineCollectionPage { Collections = collections }
+                .WithPagination(page, limit, root.SelectToken("data.total")?.Value<int>(), list.Count);
         }
 
         private static OnlineSearchPage QqTracks(OnlineCollection artist, int page, int limit)

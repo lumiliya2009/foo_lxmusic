@@ -51,7 +51,7 @@ bool is_collection(metadb_handle_ptr item) {
     try {
         std::string encoded;
         Payload payload;
-        return uri_to_payload(item->get_path(), encoded, &payload) && payload.is_collection();
+        return uri_to_payload(item->get_path(), encoded, &payload) && (payload.is_collection() || payload.is_navigation());
     } catch (...) {
         return false;
     }
@@ -65,6 +65,12 @@ public:
         metadb_handle_ptr item;
         if (!playlist_manager::get()->playlist_get_item_handle(item, m_playlist, index) || !is_collection(item))
             return false;
+        std::string encoded;
+        Payload payload;
+        if (uri_to_payload(item->get_path(), encoded, &payload) && payload.is_navigation()) {
+            command_search_page(m_playlist, index);
+            return true;
+        }
         // Use the activated row, even if several results are selected.
         metadb_handle_list items;
         items.add_item(item);

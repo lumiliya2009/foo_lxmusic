@@ -124,6 +124,7 @@ namespace LxMusic.Bridge.Online
             var query = PayloadCodec.DecodeText(args[4]).Trim();
             var page = PositiveInt(args[5], 1);
             var limit = Math.Min(50, PositiveInt(args[6], DefaultLimit));
+            if ((long)(page - 1) * limit > int.MaxValue - limit) throw new InvalidOperationException("页码过大");
             var quality = args[7];
             if (args.Length > 8 && !string.IsNullOrEmpty(args[8]))
             {
@@ -137,23 +138,34 @@ namespace LxMusic.Bridge.Online
 
             if (type == "track")
             {
-                foreach (var track in repository.Search(platform, query, page, limit).Tracks)
+                var results = repository.Search(platform, query, page, limit);
+                foreach (var track in results.Tracks)
                     Emit("ITEM", PayloadCodec.FromTrack(track, quality));
+                EmitPage(results, limit);
             }
             else if (type == "album" || type == "playlist")
             {
                 var searchType = type == "album" ? OnlineSearchType.Albums : OnlineSearchType.Playlists;
-                foreach (var collection in OnlineCollectionSearch.Search(platform, searchType, query, page, limit).Collections)
+                var results = OnlineCollectionSearch.Search(platform, searchType, query, page, limit);
+                foreach (var collection in results.Collections)
                     Emit("ITEM", PayloadCodec.FromCollection(collection, type, quality));
+                EmitPage(results, limit);
             }
             else if (type == "artist")
             {
-                foreach (var collection in ArtistCatalog.Search(platform, query, page, limit))
+                var results = ArtistCatalog.Search(platform, query, page, limit);
+                foreach (var collection in results.Collections)
                     Emit("ITEM", PayloadCodec.FromCollection(collection, "artist", quality));
+                EmitPage(results, limit);
             }
             else throw new InvalidOperationException("不支持的搜索类型：" + type);
             Ok("搜索完成");
         }
+
+        private static void EmitPage(OnlinePage result, int limit) => Emit("PAGE",
+            result.Page.ToString(CultureInfo.InvariantCulture), limit.ToString(CultureInfo.InvariantCulture),
+            (result.TotalPages ?? -1).ToString(CultureInfo.InvariantCulture),
+            (result.TotalKnown ? result.Total : -1).ToString(CultureInfo.InvariantCulture), result.HasNext ? "1" : "0");
 
         private static void Expand(OnlineMusicRepository repository, string[] args)
         {

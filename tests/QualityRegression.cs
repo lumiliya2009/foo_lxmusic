@@ -328,6 +328,67 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qu
         Check(rejected, "foreign release URL accepted");
     }
 
+    static void TestSearchPagination()
+    {
+        var first = new OnlinePage().WithPagination(1, 30, 65, 30);
+        Check(first.TotalKnown && first.TotalPages == 3 && first.HasNext, "first-page total was lost");
+        var last = new OnlinePage().WithPagination(3, 30, 65, 5);
+        Check(last.TotalPages == 3 && !last.HasNext && last.Total == 65, "last-page calculation failed");
+        Check(new OnlinePage().WithPagination(1, 30, 30, 30).TotalPages == 1, "exact page boundary added an extra page");
+        var unknown = new OnlinePage().WithPagination(2, 30, null, 30);
+        Check(!unknown.TotalKnown && unknown.TotalPages == null && unknown.HasNext, "unknown total was fabricated");
+        var unknownLast = new OnlinePage().WithPagination(3, 30, null, 5);
+        Check(!unknownLast.HasNext && unknownLast.TotalPages == null, "short unknown page invented a total");
+        var invalid = new OnlinePage().WithPagination(2, 30, 10, 30);
+        Check(!invalid.TotalKnown && invalid.TotalPages == null && invalid.HasNext, "inconsistent total blocked pagination");
+        var max = new OnlinePage().WithPagination(1, 30, int.MaxValue, 30);
+        Check(max.TotalPages == 71582789, "page count arithmetic overflowed");
+        var pageCount = OnlineMusicRepository.ParseNativeSearchResult("{\"list\":[{\"id\":\"a\",\"name\":\"A\"}],\"allPage\":4}",
+            OnlinePlatform.Qq, "tx", 2, 30, new List<string> { "flac" });
+        Check(!pageCount.TotalKnown && pageCount.TotalPages == 4 && pageCount.HasNext, "source page-count metadata was ignored");
+        var more = OnlineMusicRepository.ParseNativeSearchResult("{\"list\":[{\"id\":\"a\",\"name\":\"A\"}],\"hasNext\":true}",
+            OnlinePlatform.Qq, "tx", 2, 30, new List<string> { "flac" });
+        Check(more.HasNext && more.TotalPages == null, "source explicit hasNext was ignored");
+        var originalProfile = profile;
+        profile = Path.Combine(profile, "search-pages");
+        Directory.CreateDirectory(profile);
+        try
+        {
+            var file = Path.Combine(profile, "pagination.js");
+            File.WriteAllText(file, @"
+lx.on(lx.EVENT_NAMES.request, ({info}) => {
+  if(info.pagesize !== 30 || info.limit !== 30 || info.offset !== (info.page - 1) * 30) throw new Error('page arguments mismatch');
+  const total = 65, start = (info.page - 1) * 30;
+  const list = Array.from({length:Math.max(0,Math.min(30,total-start))}, (_,i) => ({id:String(start+i+1),name:'歌曲'+(start+i+1),singer:'歌手'}));
+  if(info.keyword === 'unknown') return {list};
+  if(info.keyword === 'pages-only') return {list,allPage:3};
+  return {list,total};
+});
+lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl','musicSearch'],qualitys:['flac']}}});");
+            Check(Bridge("import-file", Encode(file)).Code == 0, "pagination fixture import failed");
+            var pages = new List<Result>();
+            for (int number = 1; number <= 3; ++number)
+            {
+                var result = Bridge("search", "qq", "track", Encode("known"), number.ToString(), "30", "flac");
+                Check(result.Code == 0, "pagination source request failed");
+                var metadata = result.Lines.Single(line => line[0] == "PAGE");
+                Check(metadata.SequenceEqual(new[] { "PAGE", number.ToString(), "30", "3", "65", number < 3 ? "1" : "0" }), "bridge discarded page metadata");
+                Check(result.Lines.Count(line => line[0] == "ITEM") == (number < 3 ? 30 : 5), "page size was not preserved");
+                pages.Add(result);
+            }
+            var ids = pages.SelectMany(result => result.Lines.Where(line => line[0] == "ITEM").Select(line => line[1])).ToList();
+            Check(ids.Distinct().Count() == 65, "page requests repeated the first 30 results");
+            var noTotal = Bridge("search", "qq", "track", Encode("unknown"), "2", "30", "flac");
+            Check(noTotal.Lines.Single(line => line[0] == "PAGE").SequenceEqual(new[] { "PAGE", "2", "30", "-1", "-1", "1" }), "unknown page count was not exported honestly");
+            var pagesOnly = Bridge("search", "qq", "track", Encode("pages-only"), "3", "30", "flac");
+            Check(pagesOnly.Lines.Single(line => line[0] == "PAGE").SequenceEqual(new[] { "PAGE", "3", "30", "3", "-1", "0" }), "page-only totals were lost");
+            var empty = Bridge("search", "qq", "track", Encode("known"), "4", "30", "flac");
+            Check(empty.Code == 0 && !empty.Lines.Any(line => line[0] == "ITEM"), "empty page was filled with unrelated results");
+            Check(Bridge("search", "qq", "track", Encode("known"), int.MaxValue.ToString(), "30", "flac").Code != 0, "overflowing page number was accepted");
+        }
+        finally { profile = originalProfile; }
+    }
+
     static void TestCatalogs(bool live)
     {
         var kuwo = ExtendedCatalog.ParseKuwo("{\"TOTAL\":31,\"abslist\":[{\"MUSICRID\":\"MUSIC_123\",\"SONGNAME\":\"A&amp;B\",\"ARTIST\":\"歌手\",\"DURATION\":201,\"N_MINFO\":\"level:p,bitrate:320,format:mp3,size:8;level:ff,bitrate:2000,format:flac,size:25\"}]}", 1, 30);
@@ -409,6 +470,7 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{wy:{type:'music',actions:['musicUrl'],qu
             TestLibrary();
             TestCompatibility();
             TestUpdates();
+            TestSearchPagination();
             TestCatalogs(args.Contains("--live"));
             Console.WriteLine(checks + " quality/bridge regression checks passed");
             return 0;

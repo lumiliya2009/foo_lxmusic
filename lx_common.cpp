@@ -63,6 +63,7 @@ const std::string& Payload::get(size_t index) const {
 }
 
 bool Payload::is_track() const { return get(pf_kind) == "track"; }
+bool Payload::is_navigation() const { return get(pf_kind) == "search-page"; }
 bool Payload::is_collection() const {
     const auto& kind = get(pf_kind);
     return kind == "album" || kind == "artist" || kind == "playlist";
@@ -172,7 +173,10 @@ void payload_to_info(const Payload& payload, file_info& info) {
     info.meta_set("LX_KIND", payload.get(pf_kind).c_str());
     info.meta_set("LX_ID", payload.get(pf_id).c_str());
     if (!payload.get(pf_preferred_quality).empty()) info.meta_set("LX_QUALITY", payload.get(pf_preferred_quality).c_str());
-    if (payload.is_collection()) {
+    if (payload.is_navigation()) {
+        info.set_length(0);
+        info.info_set("encoding", "LX search navigation - Enter to open");
+    } else if (payload.is_collection()) {
         info.meta_set("ALBUM", payload.get(pf_platform_label).c_str());
         info.info_set("encoding", "LX collection result - Enter to open");
     } else {
@@ -373,7 +377,19 @@ std::string bridge_error(const BridgeResult& result) {
 }
 
 t_size add_payloads_to_playlist(const std::vector<std::string>& payloads, const std::string& playlist_name,
-    t_size preserve_playlist) {
+    t_size preserve_playlist, bool create_new) {
+    if (payloads.empty()) throw std::runtime_error("没有可加入播放列表的结果");
+    auto playlists = playlist_manager::get();
+    auto index = create_new ? playlists->create_playlist(playlist_name.c_str(), pfc_infinite, pfc_infinite)
+        : playlists->find_or_create_playlist(playlist_name.c_str());
+    if (index == preserve_playlist)
+        index = playlists->create_playlist(playlist_name.c_str(), pfc_infinite, pfc_infinite);
+    reset_playlist_navigation(index);
+    replace_playlist_payloads(payloads, index);
+    return index;
+}
+
+void replace_playlist_payloads(const std::vector<std::string>& payloads, t_size index, bool activate) {
     if (payloads.empty()) throw std::runtime_error("没有可加入播放列表的结果");
     metadb_handle_list items;
     auto hints = metadb_hint_list_v2::create();
@@ -389,18 +405,13 @@ t_size add_payloads_to_playlist(const std::vector<std::string>& payloads, const 
     // formatting pass already sees artist/title instead of the encoded URI.
     hints->on_done();
     auto playlists = playlist_manager::get();
-    auto index = playlists->find_or_create_playlist(playlist_name.c_str());
-    if (index == preserve_playlist)
-        index = playlists->create_playlist(playlist_name.c_str(), pfc_infinite, pfc_infinite);
-    reset_playlist_navigation(index);
     playlists->playlist_undo_backup(index);
     playlists->playlist_clear(index);
     playlists->playlist_add_items(index, items, pfc::bit_array_one(0));
     install_collection_actions(index);
-    playlists->set_active_playlist(index);
+    if (activate) playlists->set_active_playlist(index);
     playlists->playlist_set_focus_item(index, 0);
-    playlists->playlist_ensure_visible(index, 0);
-    return index;
+    if (activate) playlists->playlist_ensure_visible(index, 0);
 }
 
 metadb_handle_list selected_playlist_items() {

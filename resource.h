@@ -5,12 +5,14 @@
 #define IDD_LX_LYRICS             103
 #define IDD_LX_DOWNLOAD           104
 #define IDD_LX_SOURCES            105
+#define IDD_LX_PAGE               106
 #define IDC_LX_SOURCE             1101
 #define IDC_LX_SOURCE_LIST        1102
 #define IDC_LX_IMPORT_FILE        1103
 #define IDC_LX_IMPORT_URL         1104
 #define IDC_LX_REMOVE_SOURCE      1105
 #define IDC_LX_SELECT_SOURCE      1106
+#define IDC_LX_PAGE_NUMBER        1107
 
 #define IDC_LX_KEYWORD            1001
 #define IDC_LX_SITE               1002
