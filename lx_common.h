@@ -91,6 +91,7 @@ void add_expanded_payloads(const std::vector<std::string>& payloads, const std::
     const std::shared_ptr<NavigationOrigin>& origin);
 void reset_playlist_navigation(t_size playlist);
 bool command_back();
+extern const GUID guid_back;
 metadb_handle_list selected_playlist_items();
 std::string payload_for_handle(metadb_handle_ptr handle);
 std::string lyric_payload_for_handle(metadb_handle_ptr handle);

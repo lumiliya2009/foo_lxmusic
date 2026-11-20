@@ -34,6 +34,24 @@ int main() {
         message.message = WM_KEYUP; check(!keys.pretranslate_message(&message), "key-up navigated"); message.message = WM_KEYDOWN;
         message.wParam = 13; check(!keys.pretranslate_message(&message), "another key navigated"); message.wParam = VK_BACK;
         message.lParam = intptr_t(1) << 30; check(!keys.pretranslate_message(&message), "held Backspace skipped multiple levels"); message.lParam = 0;
+        auto* shortcuts = keyboard_shortcut_manager_v2::get();
+        check(shortcuts->dispatched == 0, "excluded key contexts reached shortcut dispatch");
+        shortcuts->local_back = true;
+        check(!keys.pretranslate_message(&message) && pm->active == child, "custom shortcut did not disable default Backspace");
+        check(shortcuts->dispatched == 0, "custom shortcut was dispatched twice");
+        check(command_back() && pm->active == parent, "custom shortcut command could not return");
+        pm->set_active_playlist(child); shortcuts->local_back = false; shortcuts->global_back = true;
+        check(!keys.pretranslate_message(&message) && pm->active == child, "global shortcut did not disable default Backspace");
+        shortcuts->global_back = false; shortcuts->consume_back = true;
+        unsigned other_actions = 0; shortcuts->action = [&] { ++other_actions; };
+        check(keys.pretranslate_message(&message) && pm->active == child && other_actions == 1,
+            "default Backspace overrode an existing user action");
+        shortcuts->action = [&] { ++other_actions; command_back(); };
+        check(keys.pretranslate_message(&message) && pm->active == parent && other_actions == 2,
+            "handled shortcut was executed again as a default");
+        pm->set_active_playlist(child); shortcuts->consume_back = false; shortcuts->action = {}; shortcuts->fail_query = true;
+        check(!keys.pretranslate_message(&message) && pm->active == child, "shortcut query failure forced default navigation");
+        shortcuts->fail_query = false;
         check(keys.pretranslate_message(&message) && pm->active == parent, "plain playlist Backspace did not return");
         check(!keys.pretranslate_message(&message), "Backspace with no parent was swallowed");
         // A pending expansion retains the original parent even after switching tabs.

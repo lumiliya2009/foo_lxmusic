@@ -674,7 +674,7 @@ static const GUID guid_remove = { 0x37dd5e63, 0x2860, 0x4a60,{ 0x93, 0x34, 0xe6,
 static const GUID guid_lyrics_main = { 0x85d64b42, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 static const GUID guid_manage = { 0x85d64b43, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 static const GUID guid_update = { 0x85d64b44, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
-static const GUID guid_back = { 0x85d64b45, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+const GUID guid_back = { 0x85d64b45, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 static mainmenu_group_popup_factory g_main_group(guid_main_group, mainmenu_groups::file,
     mainmenu_commands::sort_priority_dontcare, "LX 在线音乐");
@@ -693,7 +693,7 @@ public:
     }
     bool get_description(t_uint32 index, pfc::string_base& out) override {
         if (index == lyrics) out = "获取播放列表中所选歌曲的在线歌词；可在 foobar2000 键盘快捷键设置中绑定 Shift+Enter。";
-        else if (index == back) out = "返回打开集合前的播放列表；列表中默认按退格键返回。";
+        else if (index == back) out = "返回打开集合前的播放列表。默认退格键；在快捷键设置中绑定其他按键后，默认退格键自动停用。";
         else out = "LX 在线音乐搜索与音源管理。";
         return index < count;
     }

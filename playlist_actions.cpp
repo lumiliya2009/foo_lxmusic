@@ -31,7 +31,19 @@ public:
         const auto type = ui_selection_manager::get()->get_selection_type();
         if (type != contextmenu_item::caller_active_playlist_selection &&
             type != contextmenu_item::caller_active_playlist) return false;
-        try { return command_back(); } catch (...) { return false; }
+        try {
+            auto shortcuts = keyboard_shortcut_manager_v2::get();
+            pfc::string8 assigned;
+            // Query on each press so edits in Preferences take effect immediately.
+            // Once assigned, this action belongs entirely to the host's shortcut dispatcher.
+            if (shortcuts->get_key_description_for_action(guid_back, pfc::guid_null, assigned,
+                    keyboard_shortcut_manager::TYPE_MAIN, false) ||
+                shortcuts->get_key_description_for_action(guid_back, pfc::guid_null, assigned,
+                    keyboard_shortcut_manager::TYPE_MAIN, true)) return false;
+            // Preserve any user action assigned to Backspace before applying our default.
+            if (shortcuts->process_keydown_simple(VK_BACK)) return true;
+            return command_back();
+        } catch (...) { return false; }
     }
 };
 

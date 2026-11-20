@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <functional>
 using t_size = size_t;
 constexpr t_size pfc_infinite = SIZE_MAX;
 using HWND = int;
@@ -41,6 +42,8 @@ struct bit_array {
     size_t find_next(bool value, size_t from, size_t count) const { return find_first(value, from + 1, count); }
 };
 namespace pfc {
+using string8 = std::string;
+constexpr int guid_null = 0;
 template<typename T> struct list_base_const_t : std::vector<T> { size_t get_count() const { return this->size(); } };
 struct bit_array_true : bit_array { bool get(size_t) const override { return true; } };
 struct bit_array_bittable : bit_array {
@@ -50,6 +53,32 @@ struct bit_array_bittable : bit_array {
     void set(size_t i, bool value) { bits.at(i) = value; }
 };
 }
+namespace lxmusic { constexpr int guid_back = 100; }
+struct keyboard_shortcut_manager {
+    enum shortcut_type { TYPE_MAIN };
+    bool local_back = false, global_back = false, consume_back = false, fail_query = false;
+    unsigned dispatched = 0;
+    std::function<void()> action;
+    bool get_key_description_for_action(int command, int subcommand, pfc::string8& description,
+        shortcut_type type, bool global) {
+        if (fail_query) throw std::runtime_error("shortcut service unavailable");
+        if (command != lxmusic::guid_back || subcommand != pfc::guid_null || type != TYPE_MAIN)
+            throw std::runtime_error("queried the wrong shortcut action");
+        const bool assigned = global ? global_back : local_back;
+        description = assigned ? "Alt+Left" : "";
+        return assigned;
+    }
+};
+struct keyboard_shortcut_manager_v2 : keyboard_shortcut_manager {
+    static keyboard_shortcut_manager_v2* get() { static keyboard_shortcut_manager_v2 instance; return &instance; }
+    bool process_keydown_simple(unsigned key) {
+        if (key != VK_BACK) throw std::runtime_error("unexpected shortcut dispatch");
+        ++dispatched;
+        if (!consume_back) return false;
+        if (action) action();
+        return true;
+    }
+};
 struct order_helper {
     static size_t g_find_reverse(const size_t* order, size_t value) { for (size_t i = 0;; ++i) if (order[i] == value) return i; }
 };
