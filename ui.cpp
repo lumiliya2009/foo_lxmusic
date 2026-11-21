@@ -306,10 +306,10 @@ public:
         UpdateDetails();
         return ShowContextMenu(point, index);
     }
-    LRESULT OnListKeyDown(UINT, WPARAM key, LPARAM, BOOL&) {
+    LRESULT OnListKeyDown(UINT, WPARAM key, LPARAM, BOOL& handled) {
         const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         if (key != VK_APPS && key != VK_MULTIPLY && !(key == VK_F10 && shift)) {
-            SetMsgHandled(FALSE);
+            handled = FALSE;
             return 0;
         }
         const int index = source_list_.GetCurSel();
