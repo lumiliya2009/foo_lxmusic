@@ -125,10 +125,10 @@ namespace LxMusic.Bridge.Online
             var releaseUrl = Downloads + update.Version + "/" + update.PackageName;
             return new[]
             {
-                "https://gh-proxy.org/" + releaseUrl,
-                "https://ghfast.top/" + releaseUrl,
-                "https://gh-proxy.com/" + releaseUrl,
                 "https://gcore.jsdelivr.net/gh/" + repositoryPath,
+                "https://ghfast.top/" + releaseUrl,
+                "https://gh-proxy.org/" + releaseUrl,
+                "https://gh-proxy.com/" + releaseUrl,
                 "https://fastly.jsdelivr.net/gh/" + repositoryPath,
                 "https://cdn.jsdelivr.net/gh/" + repositoryPath,
                 releaseUrl
