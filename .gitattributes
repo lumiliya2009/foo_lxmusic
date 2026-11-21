@@ -13,3 +13,4 @@
 LICENSE text eol=lf
 *.txt text eol=lf
 licenses/*.txt -whitespace
+downloads/*.fb2k-component binary export-ignore

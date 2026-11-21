@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.12
+
+- Ask for confirmation before replacing a source during an update check, and show the result in a dialog.
+- Download component updates from jsDelivr mirrors first and GitHub as the final fallback.
+
 ## 0.1.11
 
 - Edit imported source scripts directly, including configured cookies.

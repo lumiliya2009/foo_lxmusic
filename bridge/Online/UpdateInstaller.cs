@@ -42,23 +42,28 @@ namespace LxMusic.Bridge.Online
         public static byte[] DownloadPackage(ComponentUpdate update, Func<string, bool, byte[]> fetch = null)
         {
             UpdateChecker.ValidatePackage(update);
-            foreach (var direct in new[] { false, true })
+            foreach (var url in UpdateChecker.PackageUrls(update))
             {
-                try
+                var mirror = new Uri(url).Host.EndsWith(".jsdelivr.net", StringComparison.OrdinalIgnoreCase) ||
+                    new Uri(url).Host.Equals("jsdelivr.net", StringComparison.OrdinalIgnoreCase);
+                foreach (var direct in mirror ? new[] { true, false } : new[] { false, true })
                 {
-                    byte[] bytes;
-                    if (fetch != null) bytes = fetch(update.PackageUrl, direct);
-                    else
+                    try
                     {
-                        var response = OnlineHttp.Execute(update.PackageUrl, timeoutMs: 30000,
-                            maxBytes: UpdateChecker.MaxPackageBytes, useSystemProxy: true, forceDirect: direct);
-                        if (!response.Ok) continue;
-                        bytes = response.BodyBytes;
+                        byte[] bytes;
+                        if (fetch != null) bytes = fetch(url, direct);
+                        else
+                        {
+                            var response = OnlineHttp.Execute(url, timeoutMs: 20000,
+                                maxBytes: UpdateChecker.MaxPackageBytes, useSystemProxy: true, forceDirect: direct);
+                            if (!response.Ok) continue;
+                            bytes = response.BodyBytes;
+                        }
+                        if (bytes != null && bytes.LongLength == update.Size && string.Equals(
+                            "sha256:" + Hash(bytes), update.Sha256, StringComparison.OrdinalIgnoreCase)) return bytes;
                     }
-                    if (bytes != null && bytes.LongLength == update.Size && string.Equals(
-                        "sha256:" + Hash(bytes), update.Sha256, StringComparison.OrdinalIgnoreCase)) return bytes;
+                    catch { }
                 }
-                catch { }
             }
             throw new IOException("下载安装包或校验失败，请检查网络后重试，原版本未改动");
         }

@@ -356,6 +356,13 @@ void edit_source(const SourceOption& source) {
 }
 
 void update_source(const SourceOption& source) {
+    const std::string warning = "检查音源更新：\n\n" + source.name +
+        "\n\n如果音源提供可下载的新脚本，当前脚本（包括手动修改的 Cookies）会被替换。是否继续？";
+    if (MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(warning.c_str()),
+        L"检查音源更新", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+        command_manage_sources();
+        return;
+    }
     run_task("检查音源更新",
         [source](async_state& state, threaded_process_status&, abort_callback& abort) {
             state.result = run_bridge({ "update-source", source.id, source.revision }, abort);
@@ -382,7 +389,8 @@ void update_source(const SourceOption& source) {
             }
             auto message = bridge_message(state.result);
             if (message.empty()) throw std::runtime_error("未能取得音源更新结果");
-            show_status(message);
+            MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
+                L"音源更新完成", MB_OK | MB_ICONINFORMATION);
             command_manage_sources();
         }, true);
 }

@@ -132,12 +132,21 @@ static class UpdateRegression
             if (!direct) throw new IOException("dead proxy");
             return bytes;
         });
-        Check(downloaded.SequenceEqual(bytes) && routes.SequenceEqual(new[] { false, true }), "package direct fallback failed");
+        Check(downloaded.SequenceEqual(bytes) && routes.SequenceEqual(new[] { true }), "package direct mirror failed");
         routes.Clear();
         downloaded = UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => {
-            routes.Add(direct); return direct ? bytes : new byte[bytes.Length];
+            routes.Add(direct);
+            if (direct) throw new IOException("direct blocked");
+            return bytes;
         });
-        Check(downloaded.SequenceEqual(bytes) && routes.Count == 2, "corrupt package did not retry");
+        Check(downloaded.SequenceEqual(bytes) && routes.SequenceEqual(new[] { true, false }), "mirror proxy fallback failed");
+        var corruptAttempts = 0;
+        downloaded = UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => ++corruptAttempts == 1 ? new byte[bytes.Length] : bytes);
+        Check(downloaded.SequenceEqual(bytes) && corruptAttempts == 2, "corrupt package did not retry");
+        var packageUrls = UpdateChecker.PackageUrls(Update(bytes));
+        Check(packageUrls.Length == 4 && packageUrls[0].StartsWith("https://cdn.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@v0.1.8/downloads/") &&
+            packageUrls[1].StartsWith("https://fastly.jsdelivr.net/") && packageUrls[2].StartsWith("https://gcore.jsdelivr.net/") &&
+            packageUrls[3].StartsWith("https://github.com/"), "package mirror order or repository path invalid");
         Reject(() => UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => new byte[bytes.Length]), "corrupt fallback installed");
         Reject(() => UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => { throw new IOException("offline"); }), "package outage accepted");
     }

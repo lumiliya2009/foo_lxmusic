@@ -112,6 +112,19 @@ namespace LxMusic.Bridge.Online
             return "foo_lxmusic-" + tag.TrimStart('v') + "-" + suffix + ".fb2k-component";
         }
 
+        public static string[] PackageUrls(ComponentUpdate update)
+        {
+            if (update == null) throw new InvalidOperationException("更新安装包地址无效");
+            var repositoryPath = "lumiliya2009/foo_lxmusic@" + update.Version + "/downloads/" + update.PackageName;
+            return new[]
+            {
+                "https://cdn.jsdelivr.net/gh/" + repositoryPath,
+                "https://fastly.jsdelivr.net/gh/" + repositoryPath,
+                "https://gcore.jsdelivr.net/gh/" + repositoryPath,
+                Downloads + update.Version + "/" + update.PackageName
+            };
+        }
+
         public static void ValidatePackage(ComponentUpdate update)
         {
             if (update == null || update.PackageName != PackageName(update.Version, update.Architecture) ||

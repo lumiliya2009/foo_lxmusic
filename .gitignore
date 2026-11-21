@@ -43,3 +43,6 @@
 *.mp3
 *.m4a
 *.wav
+
+# Update packages are hosted through immutable jsDelivr tag mirrors.
+!/downloads/*.fb2k-component

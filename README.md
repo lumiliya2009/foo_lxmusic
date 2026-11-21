@@ -4,8 +4,8 @@
 
 ## 下载
 
-- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.11/foo_lxmusic-0.1.11-fb1-x86.fb2k-component)
-- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.11/foo_lxmusic-0.1.11-fb2-x64.fb2k-component)
+- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.12/foo_lxmusic-0.1.12-fb1-x86.fb2k-component)
+- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.12/foo_lxmusic-0.1.12-fb2-x64.fb2k-component)
 
 ## 使用
 
@@ -21,7 +21,7 @@
 
 改返回键：在“首选项 → 快捷键”新增绑定，动作选“文件 → LX 在线音乐 → 返回上一层”。自定义后默认退格停用。
 
-默认每天自动检查组件更新，失败后稍后重试；可在设置中关闭。菜单“检查更新”也可手动检查，确认后下载对应位数的安装包并重启安装，替换失败恢复原文件。
+默认每天自动检查组件更新，失败后稍后重试；可在设置中关闭。菜单“检查更新”也可手动检查，确认后优先从 jsDelivr 多节点镜像下载对应位数的安装包，GitHub 作为最后备用；安装包会校验大小和 SHA256，替换失败恢复原文件。
 
 需要 .NET Framework 4.8，音源需自行导入。
 
