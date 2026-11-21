@@ -228,24 +228,21 @@ void payload_to_info(const Payload& payload, file_info& info, size_t number, siz
         catch (...) { title = payload.get(pf_title); }
     }
     info.meta_set("TITLE", title.c_str());
-    if (!payload.get(pf_artist).empty()) info.meta_set("ARTIST", payload.get(pf_artist).c_str());
-    if (!payload.get(pf_album).empty()) info.meta_set("ALBUM", payload.get(pf_album).c_str());
+    const bool navigation = payload.is_navigation();
+    const bool ranking = payload.is_collection() && payload.get(pf_collection_kind) == "Ranking";
+    if (!navigation && !ranking) {
+        if (!payload.get(pf_artist).empty()) info.meta_set("ARTIST", payload.get(pf_artist).c_str());
+        if (!payload.get(pf_album).empty()) info.meta_set("ALBUM", payload.get(pf_album).c_str());
+    }
     info.meta_set("LX_SOURCE", payload.get(pf_platform_label).c_str());
     info.meta_set("LX_KIND", payload.get(pf_kind).c_str());
     info.meta_set("LX_ID", payload.get(pf_id).c_str());
     if (!payload.get(pf_preferred_quality).empty()) info.meta_set("LX_QUALITY", payload.get(pf_preferred_quality).c_str());
-    if (payload.is_navigation()) {
-        info.meta_set("ARTIST", "");
-        info.meta_set("ALBUM", "");
-        info.set_length(0.001);
+    if (navigation) {
+        info.set_length(0);
         info.info_set("encoding", "LX search navigation - Enter to open");
     } else if (payload.is_collection()) {
-        const bool ranking = payload.get(pf_collection_kind) == "Ranking";
-        if (ranking) {
-            info.meta_set("ARTIST", "");
-            info.meta_set("ALBUM", "");
-        }
-        else {
+        if (!ranking) {
             info.meta_set("ALBUM", payload.get(pf_platform_label).c_str());
         }
         info.info_set("encoding", "LX collection result - Enter to open");

@@ -22,7 +22,7 @@ namespace LxMusic.Bridge.Online
         private readonly HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
         private readonly List<string> completed = new List<string>(), errors = new List<string>(), warnings = new List<string>();
         private readonly List<OnlineAlbumDownload> albums = new List<OnlineAlbumDownload>();
-        private int ok, failedTracks, failedItems, failedPages, covers, cancelled;
+        private int ok, failedTracks, failedItems, failedPages, covers, cancelled, rankingItems;
         private volatile bool stopped;
         internal bool Stopped { get => stopped; private set => stopped = value; }
         internal int PagesRead { get; set; }
@@ -78,7 +78,20 @@ namespace LxMusic.Bridge.Online
                         for (var i = 0; i < album.Tracks.Count; i++)
                             jobs.Add(new Job { Track = album.Tracks[i], Directory = album.DirectoryPath, Album = album, AlbumIndex = i });
                     }
-                    else throw new InvalidOperationException("仅支持下载歌曲和专辑");
+                    else if (payload.Kind == "playlist" && payload.CollectionKind == "Ranking")
+                    {
+                        Status("正在读取整个榜单：" + payload.Title);
+                        var ranking = payload.ToCollection();
+                        var tracks = RankingTracks(ranking);
+                        if (tracks.Count == 0) throw new InvalidOperationException("榜单没有返回歌曲");
+                        rankingItems++;
+                        foreach (var track in tracks)
+                        {
+                            if (!seen.Add("track:" + track.Platform.Id + ":" + track.Id)) continue;
+                            jobs.Add(new Job { Track = track, Directory = output });
+                        }
+                    }
+                    else throw new InvalidOperationException("仅支持下载歌曲、专辑和榜单");
                 }
                 catch (Exception ex)
                 {
@@ -159,11 +172,28 @@ namespace LxMusic.Bridge.Online
             if (PagesRead > 0 || failedPages > 0) summary += "\r\n搜索页面：已读取 " + PagesRead + " 页，失败 " + failedPages + " 页";
             if (cleanup) summary += "\r\n查重：删除 " + removed + " 个重复文件，保留 " + (ok - removed) + " 个新文件";
             if (albums.Count > 0) summary += "\r\n专辑封面：已保存 " + covers + " 张";
+            if (rankingItems > 0) summary += "\r\n榜单：已读取 " + rankingItems + " 个";
             summary += "\r\n保存到：" + output;
             foreach (var album in albums.Take(10)) summary += "\r\n" + album.DirectoryPath;
             if (errors.Count > 0) summary += "\r\n\r\n" + string.Join("\r\n", errors.Take(10));
             if (warnings.Count > 0) summary += "\r\n\r\n" + string.Join("\r\n", warnings.Take(10));
             emit(new[] { "DONE", Number(ok), Number(failedTracks), PayloadCodec.EncodeText(summary) });
+        }
+
+        private List<OnlineTrack> RankingTracks(OnlineCollection ranking)
+        {
+            var tracks = new List<OnlineTrack>();
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            const int maxPages = 100;
+            for (var page = 1; page <= maxPages; page++)
+            {
+                var result = OnlineCatalogBrowser.RankingTracks(ranking, page);
+                foreach (var track in result.Tracks)
+                    if (track != null && !string.IsNullOrWhiteSpace(track.Id) && ids.Add(track.Id))
+                        tracks.Add(track);
+                if (!result.HasNext || result.Tracks.Count == 0) break;
+            }
+            return tracks;
         }
 
         private static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);

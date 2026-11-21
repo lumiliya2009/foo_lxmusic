@@ -478,6 +478,21 @@ bool has_albums(metadb_handle_list_cref items) {
     return false;
 }
 
+bool is_ranking(const Payload& payload) {
+    return payload.get(pf_kind) == "playlist" && payload.get(pf_collection_kind) == "Ranking";
+}
+
+bool has_rankings(metadb_handle_list_cref items) {
+    for (size_t index = 0; index < items.get_count(); ++index) {
+        try {
+            std::string encoded;
+            Payload payload;
+            if (uri_to_payload(items[index]->get_path(), encoded, &payload) && is_ranking(payload)) return true;
+        } catch (...) {}
+    }
+    return false;
+}
+
 std::string quality_label(const std::string& q) {
     if (q == "128k") return "128K";
     if (q == "320k") return "320K";
@@ -1007,11 +1022,11 @@ void command_download(metadb_handle_list_cref items) {
             std::string encoded;
             Payload payload;
             if (uri_to_payload(items[index]->get_path(), encoded, &payload) &&
-                (payload.is_track() || payload.get(pf_kind) == "album")) payloads.push_back(encoded);
+                (payload.is_track() || payload.get(pf_kind) == "album" || is_ranking(payload))) payloads.push_back(encoded);
         } catch (...) {}
     }
     if (payloads.empty() && !options.can_all_pages) {
-        popup_message::g_show("请选择 LX 在线歌曲或专辑搜索结果。", "LX 批量下载");
+        popup_message::g_show("请选择 LX 在线歌曲、专辑或榜单搜索结果。", "LX 批量下载");
         return;
     }
 
@@ -1289,7 +1304,7 @@ public:
         static const char* values[] = {
             "显示所选歌曲的在线歌词。",
             "把集合中的歌曲加入新的 foobar2000 播放列表。",
-            "下载所选歌曲或整张专辑；专辑自动建立文件夹并保存封面。",
+            "下载所选歌曲、整张专辑或整个榜单；专辑自动建立文件夹并保存封面。",
             "切换所选歌曲为 128K 音质并续播。",
             "切换所选歌曲为 320K 音质并续播。",
             "切换所选歌曲为 FLAC 音质并续播。",
@@ -1334,6 +1349,11 @@ public:
         if (index == expand && !has_kind(data, true)) return false;
         if (index == download && has_albums(data)) {
             out = has_kind(data, false) ? "下载所选歌曲和专辑（含封面）…" : "下载整张专辑（含封面）…";
+            flags = 0;
+            return true;
+        }
+        if (index == download && has_rankings(data)) {
+            out = has_kind(data, false) ? "下载所选歌曲和榜单…" : "下载整个榜单…";
             flags = 0;
             return true;
         }

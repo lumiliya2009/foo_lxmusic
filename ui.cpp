@@ -687,10 +687,15 @@ public:
             std::string label;
             try {
                 const auto payload = decode_payload(payloads[index]);
-                label = payload.get(pf_artist);
-                if (!label.empty()) label += " - ";
-                label += payload.get(pf_title);
-                if (payload.get(pf_kind) == "album") label += "（整张专辑，含封面）";
+                const bool ranking = payload.get(pf_kind) == "playlist" &&
+                    payload.get(pf_collection_kind) == "Ranking";
+                if (ranking) label = payload.get(pf_title) + "（整个榜单）";
+                else {
+                    label = payload.get(pf_artist);
+                    if (!label.empty()) label += " - ";
+                    label += payload.get(pf_title);
+                    if (payload.get(pf_kind) == "album") label += "（整张专辑，含封面）";
+                }
             } catch (...) {
                 label = "在线歌曲 " + std::to_string(index + 1);
             }
@@ -834,7 +839,7 @@ private:
         const bool all = options.can_all_pages && IsDlgButtonChecked(IDC_LX_DOWNLOAD_ALL_PAGES) == BST_CHECKED;
         for (const auto control : { IDC_LX_DOWNLOAD_ITEMS, IDC_LX_SELECT_ALL, IDC_LX_SELECT_NONE })
             GetDlgItem(control).EnableWindow(all ? FALSE : TRUE);
-        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_ITEMS_LABEL, all ? "将从第 1 页逐页下载全部结果。" : "下载项目（专辑含全部歌曲和封面）：");
+        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_ITEMS_LABEL, all ? "将从第 1 页逐页下载全部结果。" : "下载项目（专辑和榜单包含全部歌曲）：");
     }
 
     static constexpr UINT_PTR preview_timer = 21;
