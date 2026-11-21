@@ -339,17 +339,30 @@ public:
         return 0;
     }
     LRESULT PerformAction(WORD id) {
+        if (id == IDC_LX_COPY_SOURCE_URL) {
+            const auto source = SelectedSource();
+            if (!source || source->url.empty()) return 0;
+            try {
+                copy_text_to_clipboard(source->url);
+                show_status("已复制音源地址");
+            } catch (const std::exception& ex) {
+                ::MessageBoxW(*this, pfc::stringcvt::string_wide_from_utf8(ex.what()),
+                    L"复制音源地址", MB_OK | MB_ICONINFORMATION);
+            }
+            source_list_.SetFocus();
+            return 0;
+        }
         if (id == IDC_LX_IMPORT_FILE) action = SourceAction::import_file;
         else if (id == IDC_LX_IMPORT_URL) action = SourceAction::import_url;
         else if (id == IDC_LX_REMOVE_SOURCE || id == IDC_LX_SELECT_SOURCE || id == IDC_LX_EDIT_SOURCE ||
-            id == IDC_LX_UPDATE_SOURCE || id == IDC_LX_COPY_SOURCE_URL) {
+            id == IDC_LX_UPDATE_SOURCE) {
             const auto source = SelectedSource();
             if (!source) return 0;
             selected = source->id;
             action = id == IDC_LX_SELECT_SOURCE ? SourceAction::select :
                 id == IDC_LX_REMOVE_SOURCE ? SourceAction::remove :
                 id == IDC_LX_EDIT_SOURCE ? SourceAction::edit :
-                id == IDC_LX_UPDATE_SOURCE ? SourceAction::update : SourceAction::copy_url;
+                SourceAction::update;
         }
         EndDialog(IDOK);
         return 0;

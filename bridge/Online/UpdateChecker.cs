@@ -118,9 +118,9 @@ namespace LxMusic.Bridge.Online
             var repositoryPath = "lumiliya2009/foo_lxmusic@" + update.Version + "/downloads/" + update.PackageName;
             return new[]
             {
-                "https://cdn.jsdelivr.net/gh/" + repositoryPath,
-                "https://fastly.jsdelivr.net/gh/" + repositoryPath,
                 "https://gcore.jsdelivr.net/gh/" + repositoryPath,
+                "https://fastly.jsdelivr.net/gh/" + repositoryPath,
+                "https://cdn.jsdelivr.net/gh/" + repositoryPath,
                 Downloads + update.Version + "/" + update.PackageName
             };
         }

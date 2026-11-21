@@ -73,13 +73,13 @@ void remember_search(const SearchOptions& options);
 
 struct SourceSite { std::string id, label; bool collections = false, searchable = true; };
 struct SourceOption {
-    std::string id, name;
+    std::string id, name, url;
     bool active = false;
     bool url_available = false;
     std::string details, revision;
     std::vector<SourceSite> sites;
 };
-enum class SourceAction { close, import_file, import_url, remove, select, edit, update, copy_url };
+enum class SourceAction { close, import_file, import_url, remove, select, edit, update };
 
 std::string base64url_encode(const void* data, size_t bytes);
 std::string base64url_encode_text(const std::string& text);
@@ -101,6 +101,8 @@ BridgeResult run_bridge_noabort(const std::vector<std::string>& args);
 std::vector<std::string> bridge_items(const BridgeResult& result);
 std::string bridge_message(const BridgeResult& result, const char* record = "OK");
 std::string bridge_error(const BridgeResult& result);
+void show_status(const std::string& message);
+void copy_text_to_clipboard(const std::string& text);
 file::ptr open_audio_stream(const std::string& url, abort_callback& abort);
 
 t_size add_payloads_to_playlist(const std::vector<std::string>& payloads, const std::string& playlist_name,

@@ -97,12 +97,13 @@ namespace LxMusic.Bridge.Online
             ResetRuntimeOnly();
         }
 
-        public SourceUpdateResult UpdateSource(string id, string revision)
+        public SourceUpdateResult UpdateSource(string id, string revision, Action<string> progress = null)
         {
             var source = Sources.Find(id);
             if (OnlineSourceStore.Revision(source) != revision)
                 throw new InvalidOperationException("音源已被其他操作修改，请重新打开后再更新");
             SourceUpdateNotice notice = null;
+            progress?.Invoke("正在执行音源内置更新检查…");
             try
             {
                 using (var runtime = LxSourceRuntime.Create(source.Script, BuildRuntimeKey(source.Script), TimeSpan.FromSeconds(25)))
@@ -114,6 +115,7 @@ namespace LxMusic.Bridge.Online
             {
                 throw new InvalidOperationException("音源自检失败，请先编辑或重新导入；原音源未修改");
             }
+            progress?.Invoke(notice == null ? "未收到更新提示，正在读取音源地址…" : "正在读取音源更新地址…");
 
             var candidates = new List<string>();
             if (notice != null && !string.IsNullOrWhiteSpace(notice.Url)) candidates.Add(notice.Url);
@@ -126,9 +128,11 @@ namespace LxMusic.Bridge.Online
                     if (!response.Ok) continue;
                     var script = response.Body.TrimStart('\uFEFF');
                     if (script.Length < 32) continue;
+                    progress?.Invoke("正在验证新版音源脚本…");
                     var descriptor = ValidateScript(script);
                     Sources.ReplaceScript(id, revision, script, descriptor);
                     ResetRuntimeOnly();
+                    progress?.Invoke("音源更新完成");
                     return new SourceUpdateResult { Descriptor = descriptor };
                 }
                 catch
@@ -137,7 +141,10 @@ namespace LxMusic.Bridge.Online
                     // alert and let the UI offer to open it.
                 }
             }
-            if (notice != null) return new SourceUpdateResult { Notice = notice };
+            if (notice != null) {
+                progress?.Invoke("音源提供更新提示");
+                return new SourceUpdateResult { Notice = notice };
+            }
             throw new InvalidOperationException("没有发现可下载的新版音源");
         }
 

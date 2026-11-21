@@ -58,7 +58,8 @@ namespace LxMusic.Bridge.Online
                             break;
                         case "update-source":
                             if (args.Length != 4) throw new InvalidOperationException("更新参数不完整");
-                            var updateResult = repository.Value.UpdateSource(args[2], args[3]);
+                            var updateResult = repository.Value.UpdateSource(args[2], args[3], text =>
+                                Emit("STATUS", PayloadCodec.EncodeText(text)));
                             if (updateResult.Notice == null) Ok(DescriptorText(updateResult.Descriptor));
                             else Emit("UPDATE_NOTICE", PayloadCodec.EncodeText(updateResult.Notice.Message),
                                 PayloadCodec.EncodeText(updateResult.Notice.Url));
@@ -108,7 +109,7 @@ namespace LxMusic.Bridge.Online
                 var stored = store.Find(source.Id);
                 Emit("SOURCE", source.Id, PayloadCodec.EncodeText(source.Name), source.Id == active ? "1" : "0",
                     PayloadCodec.EncodeText(SourceMetadata.Details(source)), source.UrlAvailable ? "1" : "0",
-                    OnlineSourceStore.Revision(stored));
+                    OnlineSourceStore.Revision(stored), PayloadCodec.EncodeText(stored.Url ?? string.Empty));
                 var seen = new HashSet<string>();
                 foreach (var key in source.Descriptor.Sources.Keys)
                 {

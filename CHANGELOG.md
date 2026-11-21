@@ -7,6 +7,8 @@
 - Show source version, author, description, supported platforms and qualities.
 - Check paid-source updates through LX `updateAlert`, or open the provided update page.
 - Copy the address of a source imported from a URL.
+- Keep the source manager open after copying a source address.
+- Show stage-by-stage status while checking for source updates.
 - Use status messages for update checks and direct-link copies.
 - Add open-folder and close buttons to the download completion dialog.
 - Ask for confirmation before source updates and show the result in a dialog.

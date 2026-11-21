@@ -400,7 +400,8 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qu
                 var bytes = new byte[] { 0 }.Concat(Encoding.UTF8.GetBytes(root.ToString())).ToArray();
                 File.WriteAllBytes(Path.Combine(profile, "online-source.json"), bytes);
                 var urlRow = Bridge("source-options").Lines.Single(line => line[0] == "SOURCE");
-                Check(urlRow.Length >= 7 && urlRow[5] == "1", "network source address availability was not exported");
+                Check(urlRow.Length >= 8 && urlRow[5] == "1" && Decode(urlRow[7]) == stored.Url,
+                    "network source address was not exported to the manager");
                 var copied = Bridge("source-url", urlRow[1]);
                 Check(copied.Code == 0 && Decode(copied.Lines.Single(line => line[0] == "URL")[1]) == stored.Url,
                     "network source address could not be copied");

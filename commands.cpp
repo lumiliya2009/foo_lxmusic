@@ -254,6 +254,7 @@ std::vector<SourceOption> source_options(const BridgeResult& result) {
             source.url_available = f.size() >= 6 && f[5] == "1";
             if (f.size() >= 7 && f[6].size() == 64 && f[6].find_first_not_of("0123456789abcdef") == std::string::npos)
                 source.revision = f[6];
+            if (f.size() >= 8) source.url = base64url_decode(f[7]);
             sources.push_back(std::move(source));
         } else if (f.size() >= 5 && f[0] == "SITE") {
             if (f[4] == "unavailable") continue;
@@ -264,35 +265,6 @@ std::vector<SourceOption> source_options(const BridgeResult& result) {
         }
     }
     return sources;
-}
-
-void show_status(const std::string& message) {
-    static service_ptr_t<ui_status_text_override> status;
-    if (!status.is_valid()) ui_control::get()->override_status_text_create(status);
-    if (status.is_valid()) status->override_text(message.c_str());
-}
-
-void copy_text_to_clipboard(const std::string& text) {
-    if (text.empty() || text.size() > 65536 || text.find('\0') != std::string::npos)
-        throw std::runtime_error("无法复制无效文本");
-    const std::wstring value = pfc::stringcvt::string_wide_from_utf8(text.c_str()).get_ptr();
-    const auto bytes = (value.size() + 1) * sizeof(wchar_t);
-    const auto memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    if (!memory) throw std::runtime_error("无法分配剪贴板内存");
-    const auto data = GlobalLock(memory);
-    if (!data) { GlobalFree(memory); throw std::runtime_error("无法写入剪贴板"); }
-    std::memcpy(data, value.c_str(), bytes);
-    GlobalUnlock(memory);
-    if (!OpenClipboard(core_api::get_main_window())) {
-        GlobalFree(memory);
-        throw std::runtime_error("剪贴板正被占用，请稍后重试");
-    }
-    const bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory) != nullptr;
-    CloseClipboard();
-    if (!copied) {
-        GlobalFree(memory);
-        throw std::runtime_error("无法复制到剪贴板，请重试");
-    }
 }
 
 void start_bridge_message(const char* title, std::vector<std::string> args, std::function<void()> next = {}) {
@@ -363,9 +335,17 @@ void update_source(const SourceOption& source) {
         command_manage_sources();
         return;
     }
+    show_status("正在检查音源更新：" + source.name);
     run_task("检查音源更新",
         [source](async_state& state, threaded_process_status&, abort_callback& abort) {
-            state.result = run_bridge({ "update-source", source.id, source.revision }, abort);
+            state.result = run_bridge({ "update-source", source.id, source.revision }, abort,
+                [](const BridgeLine& line) {
+                    if (line.fields.size() < 2 || line.fields[0] != "STATUS") return;
+                    try {
+                        const auto message = base64url_decode(line.fields[1]);
+                        fb2k::inMainThread([message] { show_status(message); });
+                    } catch (...) {}
+                });
         },
         [](async_state& state) {
             for (const auto& line : state.result.lines) {
@@ -392,19 +372,6 @@ void update_source(const SourceOption& source) {
             MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
                 L"音源更新完成", MB_OK | MB_ICONINFORMATION);
             command_manage_sources();
-        }, true);
-}
-
-void copy_source_url(const SourceOption& source) {
-    run_task("复制音源地址",
-        [id = source.id](async_state& state, threaded_process_status&, abort_callback& abort) {
-            state.result = run_bridge({ "source-url", id }, abort);
-        },
-        [](async_state& state) {
-            auto address = bridge_message(state.result, "URL");
-            if (address.empty()) throw std::runtime_error("未能读取音源地址");
-            copy_text_to_clipboard(address);
-            show_status("已复制音源地址");
         }, true);
 }
 
@@ -679,14 +646,12 @@ void command_manage_sources() {
                 if (MessageBoxW(core_api::get_main_window(), L"删除选中的音源？其他音源会保留。", L"管理音源",
                     MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) { command_manage_sources(); return; }
                 args = { "remove-source", selected };
-            } else if (action == SourceAction::edit || action == SourceAction::update ||
-                action == SourceAction::copy_url) {
+            } else if (action == SourceAction::edit || action == SourceAction::update) {
                 const auto found = std::find_if(sources.begin(), sources.end(),
                     [&selected](const SourceOption& source) { return source.id == selected; });
                 if (found == sources.end()) return;
                 if (action == SourceAction::edit) edit_source(*found);
-                else if (action == SourceAction::update) update_source(*found);
-                else copy_source_url(*found);
+                else update_source(*found);
                 return;
             } else {
                 if (action == SourceAction::import_file) {

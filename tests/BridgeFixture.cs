@@ -61,12 +61,12 @@ static class BridgeFixture
         {
             Console.WriteLine("SOURCE\t11111111111111111111111111111111\t" + Encode("测试音源一") + "\t1\t" +
                 Encode("名称：测试音源一\n版本：v1\n作者：fixture\n支持站点：QQ音乐\n支持音质：\nQQ音乐（无损音质）\n描述：测试描述") +
-                "\t1\t" + new string('a', 64));
+                "\t1\t" + new string('a', 64) + "\t" + Encode("https://example.com/fixture-source?key=test"));
             Console.WriteLine("SITE\t11111111111111111111111111111111\tqq\t" + Encode("QQ音乐") + "\ttrack,album,artist,playlist");
             Console.WriteLine("SITE\t11111111111111111111111111111111\tqishui\t" + Encode("汽水音乐") + "\tunavailable");
             Console.WriteLine("SOURCE\t22222222222222222222222222222222\t" + Encode("测试音源二") + "\t0\t" +
                 Encode("名称：测试音源二\n版本：v1\n作者：fixture\n支持站点：咪咕音乐\n支持音质：\n咪咕音乐（无损音质）") +
-                "\t0\t" + new string('b', 64));
+                "\t0\t" + new string('b', 64) + "\t" + Encode(""));
             Console.WriteLine("SITE\t22222222222222222222222222222222\tmigu\t" + Encode("咪咕音乐") + "\ttrack");
         }
         else if (command == "source-script")

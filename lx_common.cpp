@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include <charconv>
+#include <cstring>
 
 namespace lxmusic {
 
@@ -250,6 +251,35 @@ std::string data_directory() {
     if (!path.empty() && path.back() != '\\' && path.back() != '/') path.push_back('\\');
     path += "foo_lxmusic";
     return path;
+}
+
+void show_status(const std::string& message) {
+    static service_ptr_t<ui_status_text_override> status;
+    if (!status.is_valid()) ui_control::get()->override_status_text_create(status);
+    if (status.is_valid()) status->override_text(message.c_str());
+}
+
+void copy_text_to_clipboard(const std::string& text) {
+    if (text.empty() || text.size() > 65536 || text.find('\0') != std::string::npos)
+        throw std::runtime_error("无法复制无效文本");
+    const std::wstring value = pfc::stringcvt::string_wide_from_utf8(text.c_str()).get_ptr();
+    const auto bytes = (value.size() + 1) * sizeof(wchar_t);
+    const auto memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!memory) throw std::runtime_error("无法分配剪贴板内存");
+    const auto data = GlobalLock(memory);
+    if (!data) { GlobalFree(memory); throw std::runtime_error("无法写入剪贴板"); }
+    std::memcpy(data, value.c_str(), bytes);
+    GlobalUnlock(memory);
+    if (!OpenClipboard(core_api::get_main_window())) {
+        GlobalFree(memory);
+        throw std::runtime_error("剪贴板正被占用，请稍后重试");
+    }
+    const bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory) != nullptr;
+    CloseClipboard();
+    if (!copied) {
+        GlobalFree(memory);
+        throw std::runtime_error("无法复制到剪贴板，请重试");
+    }
 }
 
 BridgeResult run_bridge(const std::vector<std::string>& args, abort_callback& abort,
