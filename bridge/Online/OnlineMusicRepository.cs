@@ -167,7 +167,7 @@ namespace LxMusic.Bridge.Online
         {
             var hash = 17;
             unchecked { foreach (var ch in script) hash = hash * 31 + ch; }
-            return "tz_" + (uint)hash;
+            return "lx_" + (uint)hash;
         }
 
         private LxSourceRuntime EnsureRuntime()
