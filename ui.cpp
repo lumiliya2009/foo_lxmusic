@@ -236,12 +236,14 @@ public:
 
 class source_manager_dialog : public CDialogImpl<source_manager_dialog> {
 public:
+    source_manager_dialog() : source_list_(this, 1) {}
     enum { IDD = IDD_LX_SOURCES };
     std::vector<SourceOption> sources;
     std::string selected;
     SourceAction action = SourceAction::close;
     BEGIN_MSG_MAP(source_manager_dialog)
         MSG_WM_INITDIALOG(OnInitDialog)
+        MSG_WM_DESTROY(OnDestroy)
         COMMAND_HANDLER(IDC_LX_SOURCE_LIST, LBN_SELCHANGE, OnSelectionChanged)
         MESSAGE_HANDLER(WM_CONTEXTMENU, OnContextMenu)
         COMMAND_ID_HANDLER(IDC_LX_IMPORT_FILE, OnAction)
@@ -252,10 +254,14 @@ public:
         COMMAND_ID_HANDLER(IDC_LX_REMOVE_SOURCE, OnAction)
         COMMAND_ID_HANDLER(IDC_LX_SELECT_SOURCE, OnAction)
         COMMAND_ID_HANDLER(IDCANCEL, OnAction)
+        ALT_MSG_MAP(1)
+        MESSAGE_HANDLER(WM_KEYDOWN, OnListKeyDown)
+        MESSAGE_HANDLER(WM_CONTEXTMENU, OnContextMenu)
     END_MSG_MAP()
     BOOL OnInitDialog(CWindow, LPARAM) {
         CenterWindow(GetParent());
-        auto list = CListBox(GetDlgItem(IDC_LX_SOURCE_LIST));
+        source_list_.SubclassWindow(GetDlgItem(IDC_LX_SOURCE_LIST));
+        auto& list = source_list_;
         int current = 0;
         for (size_t i = 0; i < sources.size(); ++i) {
             const auto label = sources[i].name + (sources[i].active ? "（当前）" : "");
@@ -263,9 +269,11 @@ public:
             if (sources[i].active) current = static_cast<int>(i);
         }
         list.SetCurSel(current);
+        list.SetFocus();
         UpdateDetails();
         return TRUE;
     }
+    void OnDestroy() { if (source_list_.IsWindow()) source_list_.UnsubclassWindow(); }
     const SourceOption* SelectedSource() const {
         const int index = CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).GetCurSel();
         return index >= 0 && static_cast<size_t>(index) < sources.size() ? &sources[index] : nullptr;
@@ -275,7 +283,8 @@ public:
         uSetDlgItemText(*this, IDC_LX_SOURCE_DETAILS, source ? source->details.c_str() : "尚未导入音源。");
     }
     LRESULT OnSelectionChanged(WORD, WORD, HWND, BOOL&) { UpdateDetails(); return 0; }
-    LRESULT OnContextMenu(UINT, WPARAM, LPARAM position, BOOL&) {
+    LRESULT OnContextMenu(UINT, WPARAM source, LPARAM position, BOOL&) {
+        if (source && GetTickCount() - suppress_keyboard_context_ < 250) return 0;
         POINT point{ GET_X_LPARAM(position), GET_Y_LPARAM(position) };
         if (point.x == -1 && point.y == -1) {
             const auto selected = CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).GetCurSel();
@@ -295,7 +304,23 @@ public:
         if (index < 0 || static_cast<size_t>(index) >= sources.size()) return 0;
         CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).SetCurSel(index);
         UpdateDetails();
-
+        return ShowContextMenu(point, index);
+    }
+    LRESULT OnListKeyDown(UINT, WPARAM key, LPARAM, BOOL&) {
+        const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (key != VK_APPS && key != VK_MULTIPLY && !(key == VK_F10 && shift)) {
+            SetMsgHandled(FALSE);
+            return 0;
+        }
+        const int index = source_list_.GetCurSel();
+        if (index < 0 || static_cast<size_t>(index) >= sources.size()) return 0;
+        RECT item{};
+        source_list_.GetItemRect(index, &item);
+        source_list_.ClientToScreen(&item);
+        suppress_keyboard_context_ = GetTickCount();
+        return ShowContextMenu(POINT{ item.left, item.bottom }, index);
+    }
+    LRESULT ShowContextMenu(POINT point, int index) {
         HMENU menu = CreatePopupMenu();
         if (!menu) return 0;
         const auto source = &sources[index];
@@ -305,9 +330,11 @@ public:
         AppendMenuW(menu, MF_STRING | (source->url_available ? 0 : MF_GRAYED), IDC_LX_COPY_SOURCE_URL, L"复制音源地址");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, IDC_LX_REMOVE_SOURCE, L"删除");
-        const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+        SetForegroundWindow(*this);
+        const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
             point.x, point.y, 0, *this, nullptr);
         DestroyMenu(menu);
+        PostMessage(WM_NULL);
         if (command) PerformAction(static_cast<WORD>(command));
         return 0;
     }
@@ -330,6 +357,9 @@ public:
     LRESULT OnAction(WORD, WORD id, HWND, BOOL&) {
         return PerformAction(id);
     }
+private:
+    CContainedWindowT<CListBox> source_list_;
+    DWORD suppress_keyboard_context_ = 0;
 };
 
 class source_editor_dialog : public CDialogImpl<source_editor_dialog> {
