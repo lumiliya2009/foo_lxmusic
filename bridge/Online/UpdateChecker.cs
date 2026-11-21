@@ -17,6 +17,7 @@ namespace LxMusic.Bridge.Online
         public string PackageUrl { get; set; }
         public string Sha256 { get; set; }
         public long Size { get; set; }
+        public string Changelog { get; set; } = string.Empty;
     }
 
     public static class UpdateChecker
@@ -87,7 +88,12 @@ namespace LxMusic.Bridge.Online
             var url = root.Value<string>("html_url") ?? string.Empty;
             if (url != Releases + tag || !Uri.IsWellFormedUriString(url, UriKind.Absolute))
                 throw new InvalidOperationException("更新地址不属于本项目的 GitHub 发布页");
-            var update = new ComponentUpdate { Version = tag, Url = url };
+            var update = new ComponentUpdate
+            {
+                Version = tag,
+                Url = url,
+                Changelog = NormalizeChangelog(root.Value<string>("body") ?? root.Value<string>("changelog"))
+            };
             if (architecture == null) return update;
             update.Architecture = architecture;
             update.PackageName = PackageName(tag, architecture);
@@ -138,6 +144,14 @@ namespace LxMusic.Bridge.Online
             if (update.Size < 1 || update.Size > MaxPackageBytes || update.Sha256 == null ||
                 !Regex.IsMatch(update.Sha256, @"\Asha256:[0-9a-fA-F]{64}\z"))
                 throw new InvalidOperationException("更新安装包缺少有效的大小或 SHA256 校验信息");
+        }
+
+        private static string NormalizeChangelog(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            var text = value.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+            if (text.Length > 4096) text = text.Substring(0, 4096).TrimEnd();
+            return text;
         }
 
         private static Version ParseVersion(string text)

@@ -219,7 +219,10 @@ namespace LxMusic.Bridge.Online
             if (ReferenceEquals(platform, OnlinePlatform.Qq)) return SortTracks(SearchQq(clean, page, limit));
             if (ReferenceEquals(platform, OnlinePlatform.Kugou)) return SortTracks(SearchKugou(clean, page, limit));
             if (ReferenceEquals(platform, OnlinePlatform.Netease)) return SortTracks(SearchNetease(clean, page, limit));
-            return SortTracks(ExtendedCatalog.Search(platform, clean, page, limit));
+            var extended = ExtendedCatalog.Search(platform, clean, page, limit);
+            // The public Qishui catalog ranks candidates locally by query
+            // relevance. Preserve that order instead of applying title sort.
+            return ReferenceEquals(platform, OnlinePlatform.Qishui) ? extended : SortTracks(extended);
         }
 
         private static bool IsSearchAction(string action) =>

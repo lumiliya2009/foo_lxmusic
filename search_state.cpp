@@ -16,10 +16,13 @@ int integer(const std::string& text) {
 }
 void validate(const SearchPage& value) {
     const auto& o = value.options;
-    if (o.keyword.empty() || o.keyword.size() > 4096 || o.source.size() != 32 ||
+    const bool empty_keyword_allowed = o.type == "playlist" || o.type == "rankings" ||
+        o.type == "featured" || o.type == "categories" || o.type == "discover";
+    if ((!empty_keyword_allowed && o.keyword.empty()) || o.keyword.size() > 4096 || o.source.size() != 32 ||
         o.source.find_first_not_of("0123456789abcdef") != std::string::npos ||
         o.site.empty() || o.site.size() > 32 || o.site.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_-") != std::string::npos ||
-        (o.type != "track" && o.type != "album" && o.type != "artist" && o.type != "playlist") ||
+        (o.type != "track" && o.type != "album" && o.type != "artist" && o.type != "playlist" &&
+            o.type != "featured" && o.type != "rankings" && o.type != "categories" && o.type != "discover") ||
         o.quality.empty() || o.quality.size() > 32 || o.quality.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_") != std::string::npos ||
         value.page < 1 || value.page > max_page || value.limit < 1 || value.limit > 50 ||
         (value.total_pages != -1 && value.total_pages < 1) || value.total_items < -1 ||

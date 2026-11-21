@@ -9,6 +9,7 @@
 #define IDD_LX_PREFERENCES        107
 #define IDD_LX_SOURCE_EDITOR      108
 #define IDD_LX_DOWNLOAD_DONE      109
+#define IDD_LX_BROWSE             110
 #define IDC_LX_SOURCE             1101
 #define IDC_LX_SOURCE_LIST        1102
 #define IDC_LX_IMPORT_FILE        1103
@@ -55,6 +56,7 @@
 #define IDC_LX_EDITOR_TEXT        1032
 #define IDC_LX_DOWNLOAD_DONE_TEXT 1033
 #define IDC_LX_OPEN_DOWNLOAD_DIR  1034
+#define IDC_LX_APPLY_SEARCH_NAMING 1035
 
 #ifndef IDC_STATIC
 #define IDC_STATIC -1

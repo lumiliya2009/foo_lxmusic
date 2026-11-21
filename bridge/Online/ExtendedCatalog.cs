@@ -44,6 +44,22 @@ namespace LxMusic.Bridge.Online
                     ["User-Agent"] = "Mozilla/5.0 (Linux; Android 11) AppleWebKit/534.30 Mobile Safari/534.30"
                 }), page, limit);
             }
+            if (platform == OnlinePlatform.Qishui)
+            {
+                // The public vehicle catalog exposes Qishui search results
+                // without a user Cookie. Offset parameters are ignored, so
+                // fetch one bounded candidate set and paginate it locally.
+                var url = OnlineHttp.Query("https://api-vehicle.volcengine.com/v2/search/type",
+                    new Dictionary<string, object>
+                    {
+                        ["keyword"] = query,
+                        ["search_type"] = "music",
+                        ["limit"] = 100,
+                        ["real_offset"] = 0,
+                        ["search_source"] = "qishui"
+                    });
+                return ParseQishui(ReadQishui(url), query, page, limit);
+            }
             throw new InvalidOperationException(platform.Label + "需要音源提供搜索接口，当前音源只提供播放解析");
         }
 
@@ -52,6 +68,29 @@ namespace LxMusic.Bridge.Online
             var response = OnlineHttp.Execute(url, headers: headers, maxBytes: 8 * 1024 * 1024);
             if (!response.Ok) throw new InvalidOperationException("站点搜索失败（HTTP " + response.StatusCode + "）");
             if (string.IsNullOrWhiteSpace(response.Body)) throw new InvalidOperationException("站点搜索返回空响应，请稍后重试");
+            return response.Body;
+        }
+
+        private static string ReadQishui(string url)
+        {
+            var headers = new Dictionary<string, string>
+            {
+                ["Accept"] = "application/json,text/plain,*/*",
+                ["User-Agent"] = OnlineHttp.BrowserUserAgent
+            };
+            OnlineHttpResponse response;
+            try
+            {
+                response = OnlineHttp.Execute(url, headers: headers, timeoutMs: 12000,
+                    maxBytes: 8 * 1024 * 1024, forceDirect: true);
+            }
+            catch
+            {
+                response = OnlineHttp.Execute(url, headers: headers, timeoutMs: 12000,
+                    maxBytes: 8 * 1024 * 1024, useSystemProxy: true);
+            }
+            if (!response.Ok) throw new InvalidOperationException("汽水音乐搜索失败（HTTP " + response.StatusCode + "）");
+            if (string.IsNullOrWhiteSpace(response.Body)) throw new InvalidOperationException("汽水音乐搜索返回空响应，请稍后重试");
             return response.Body;
         }
 
@@ -127,6 +166,92 @@ namespace LxMusic.Bridge.Online
                 tracks.Add(track);
             }
             return new OnlineSearchPage { Tracks = tracks }.WithPagination(page, limit, result.Value<int?>("totalCount"), tracks.Count);
+        }
+
+        public static OnlineSearchPage ParseQishui(string json, string query, int page, int limit)
+        {
+            page = Math.Max(1, page);
+            limit = Math.Max(1, Math.Min(50, limit));
+            var root = JObject.Parse(json);
+            var errno = root.Value<int?>("errno");
+            if (errno.HasValue && errno.Value != 0)
+                throw new InvalidOperationException("汽水音乐搜索失败：" + (root.Value<string>("msg") ?? "接口暂不可用"));
+            var list = root.SelectToken("data.list") as JArray;
+            if (list == null) throw new InvalidOperationException("汽水音乐搜索返回的数据格式不正确");
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var candidates = new List<QishuiCandidate>();
+            foreach (var item in list.OfType<JObject>())
+            {
+                var id = (item.Value<string>("item_id") ?? string.Empty).Trim();
+                var title = TextUtil.HtmlDecode(item.Value<string>("title"));
+                if (id.Length == 0 || string.IsNullOrWhiteSpace(title) || !seen.Add(id)) continue;
+                var artist = TextUtil.HtmlDecode((item["author_info"] as JObject)?.Value<string>("name"));
+                var album = TextUtil.HtmlDecode(item.Value<string>("collection_name"));
+                var cover = item.Value<string>("cover_url") ?? string.Empty;
+                var duration = (item.Value<long?>("duration") ?? 0) * 1000L;
+                var qualities = new List<OnlineQuality>
+                    { OnlineQuality.Standard, OnlineQuality.High, OnlineQuality.Lossless };
+                var track = Track(OnlinePlatform.Qishui, id, title, artist, album, string.Empty,
+                    duration, cover, qualities);
+                candidates.Add(new QishuiCandidate
+                {
+                    Track = track,
+                    Score = QishuiScore(query, title, artist, album),
+                    Order = candidates.Count
+                });
+            }
+
+            var ranked = candidates
+                .OrderByDescending(candidate => candidate.Score)
+                .ThenBy(candidate => candidate.Order)
+                .Select(candidate => candidate.Track)
+                .ToList();
+            var offset = (long)(page - 1) * limit;
+            var tracks = offset >= ranked.Count
+                ? new List<OnlineTrack>()
+                : ranked.Skip((int)offset).Take(limit).ToList();
+            return new OnlineSearchPage { Tracks = tracks }
+                .WithPagination(page, limit, ranked.Count, tracks.Count);
+        }
+
+        private static int QishuiScore(string query, string title, string artist, string album)
+        {
+            var wanted = NormalizeSearchText(query);
+            var normalizedTitle = NormalizeSearchText(title);
+            var normalizedArtist = NormalizeSearchText(artist);
+            var normalizedAlbum = NormalizeSearchText(album);
+            var score = 0;
+
+            if (wanted.Length > 0)
+            {
+                if (normalizedTitle == wanted) score += 180;
+                else if (normalizedTitle.Contains(wanted)) score += 120;
+                else if (normalizedTitle.Length > 0 && wanted.Contains(normalizedTitle)) score += 70;
+                if (normalizedArtist == wanted) score += 150;
+                else if (normalizedArtist.Contains(wanted)) score += 105;
+                if (normalizedAlbum == wanted) score += 80;
+                else if (normalizedAlbum.Contains(wanted)) score += 45;
+            }
+
+            foreach (var token in Regex.Split(query ?? string.Empty, @"[\s,，、/;；|]+")
+                .Select(NormalizeSearchText).Where(value => value.Length > 0).Distinct())
+            {
+                if (normalizedTitle.Contains(token)) score += 28;
+                if (normalizedArtist.Contains(token)) score += 22;
+                if (normalizedAlbum.Contains(token)) score += 10;
+            }
+            return score;
+        }
+
+        private static string NormalizeSearchText(string value) =>
+            Regex.Replace((value ?? string.Empty).ToLowerInvariant(), @"[\p{P}\p{S}\s]+", string.Empty);
+
+        private sealed class QishuiCandidate
+        {
+            public OnlineTrack Track { get; set; }
+            public int Score { get; set; }
+            public int Order { get; set; }
         }
 
         private static OnlineTrack Track(OnlinePlatform platform, string id, string title, string artist, string album,

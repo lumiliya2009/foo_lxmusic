@@ -227,6 +227,9 @@ lx.send(lx.EVENT_NAMES.inited, { sources: { tx: { type: 'music', actions: ['musi
         Check(options.Lines.Where(line => line[0] == "SITE" && line[1] == second).Select(line => line[2])
             .SequenceEqual(new[] { "migu", "kuwo", "qishui", "custom_music" }), "source platforms were not exposed correctly");
         Check(options.Lines.Any(line => line[0] == "SITE" && Decode(line[3]) == "汽水音乐"), "raw qs identifier leaked into labels");
+        var qqSite = Bridge("source-options").Lines.Single(line => line[0] == "SITE" && line[2] == "qq");
+        Check(qqSite[4].Contains("rankings") && qqSite[4].Contains("categories"),
+            "catalog browse capabilities were not exposed for QQ");
         Check(Bridge("import-file", Encode(secondFile)).Code == 0, "duplicate source import failed");
         Check(Bridge("source-options").Lines.Count(line => line[0] == "SOURCE") == 2, "duplicate import created extra source");
         Check(Bridge("select-source", first).Code == 0, "switch to existing source failed");
@@ -269,7 +272,8 @@ lx.send(lx.EVENT_NAMES.inited, { sources: { tx: { type: 'music', actions: ['musi
         Check(Bridge("import-file", Encode(resolveOnly)).Code == 0, "resolve-only source import failed");
         var filtered = Bridge("source-options");
         var resolveOnlyId = filtered.Lines.Single(line => line[0] == "SOURCE" && line[3] == "1")[1];
-        Check(filtered.Lines.Where(line => line[0] == "SITE" && line[1] == resolveOnlyId).Select(line => line[2]).SequenceEqual(new[] { "qq" }), "unsearchable source platforms were displayed");
+        Check(filtered.Lines.Where(line => line[0] == "SITE" && line[1] == resolveOnlyId).Select(line => line[2]).SequenceEqual(new[] { "qishui", "qq" }),
+            "built-in Qishui search was not exposed for a resolve-only source");
 
         var originalProfile = profile;
         profile = Path.Combine(originalProfile, "legacy");
@@ -511,15 +515,91 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl','mu
         var mgInfo = JObject.Parse(migu.Tracks.Single().MusicInfoJson);
         Check((string)mgInfo["copyrightId"] == "copyright-321" && (string)mgInfo["songmid"] == "123" && (string)mgInfo["interval"] == "03:05", "Migu playback IDs/duration lost");
         Check(migu.Tracks[0].AvailableQualities.Single() == OnlineQuality.HiRes && !migu.HasNext, "Migu quality/pagination incorrect");
+        const string qishuiJson = @"{
+  ""errno"": 0,
+  ""msg"": ""success"",
+  ""data"": {
+    ""list"": [
+      {
+        ""item_id"": ""cover"",
+        ""title"": ""晴天（Cover）"",
+        ""author_info"": { ""name"": ""翻唱歌手"" },
+        ""cover_url"": ""https://img.example/cover.jpg"",
+        ""duration"": 201
+      },
+      {
+        ""item_id"": ""artist-exact"",
+        ""title"": ""一路向北"",
+        ""author_info"": { ""name"": ""周杰伦"" },
+        ""cover_url"": ""https://img.example/artist.jpg"",
+        ""duration"": 275
+      },
+      {
+        ""item_id"": ""title-exact"",
+        ""title"": ""晴天"",
+        ""author_info"": { ""name"": ""周杰伦"" },
+        ""cover_url"": ""https://img.example/title.jpg"",
+        ""duration"": 269
+      }
+    ]
+  }
+}";
+        var qishui = ExtendedCatalog.ParseQishui(qishuiJson, "周杰伦", 1, 2);
+        Check(qishui.Tracks.Select(track => track.Id).SequenceEqual(new[] { "artist-exact", "title-exact" }),
+            "Qishui results were not ranked by artist relevance");
+        Check(qishui.Tracks.All(track => track.Platform == OnlinePlatform.Qishui &&
+            !string.IsNullOrWhiteSpace(track.ArtworkUrl) && track.DurationMs > 0), "Qishui metadata lost");
+        var qsInfo = JObject.Parse(qishui.Tracks[0].MusicInfoJson);
+        Check((string)qsInfo["source"] == "qs" && (string)qsInfo["songmid"] == "artist-exact" &&
+            qsInfo["_types"]["flac"] != null, "Qishui playback payload incorrect");
+        var qishuiNext = ExtendedCatalog.ParseQishui(qishuiJson, "周杰伦", 2, 2);
+        Check(qishuiNext.Tracks.Single().Id == "cover" && qishuiNext.TotalPages == 2 && !qishuiNext.HasNext,
+            "Qishui local pagination incorrect");
         if (live)
         {
             TestSourceProxy();
-            foreach (var platform in new[] { OnlinePlatform.Kuwo, OnlinePlatform.Migu })
+            foreach (var platform in new[] { OnlinePlatform.Kuwo, OnlinePlatform.Migu, OnlinePlatform.Qishui })
             {
                 var results = ExtendedCatalog.Search(platform, "张学友", 1, 3);
                 Check(results.Tracks.Count > 0 && results.Tracks.All(track => track.Platform == platform && !string.IsNullOrWhiteSpace(track.Id)), "live catalog returned no valid songs: " + platform.Id);
                 Console.WriteLine(platform.Label + ": " + results.Tracks.Count + " catalog tracks");
             }
+            foreach (var platform in new[] { OnlinePlatform.Qq, OnlinePlatform.Kugou, OnlinePlatform.Netease, OnlinePlatform.Kuwo, OnlinePlatform.Migu })
+            {
+                var rankings = OnlineCatalogBrowser.Rankings(platform, 1, 3);
+                Check(rankings.Collections.Count > 0 &&
+                    rankings.Collections.All(item => item.Kind == OnlineCollectionKind.Ranking),
+                    "live rankings returned no valid charts: " + platform.Id);
+                var rankingTracks = OnlineCatalogBrowser.RankingTracks(rankings.Collections[0], 1);
+                Check(rankingTracks.Tracks.Count > 0 && rankingTracks.Tracks.All(track => track.Platform == platform),
+                    "live chart tracks were not readable: " + platform.Id);
+                if (OnlineCatalogBrowser.SupportsFeaturedPlaylists(platform))
+                {
+                    var playlists = OnlineCatalogBrowser.FeaturedPlaylists(platform, 1, 3);
+                    Check(playlists.Collections.Count > 0 &&
+                        playlists.Collections.All(item => item.Kind == OnlineCollectionKind.Playlist),
+                        "live featured playlists returned no valid items: " + platform.Id);
+                }
+                if (OnlineCatalogBrowser.SupportsCategories(platform))
+                {
+                    var categories = OnlineCatalogBrowser.Categories(platform, 1, 3);
+                    Check(categories.Collections.Count > 0 &&
+                        categories.Collections.All(item => item.Kind == OnlineCollectionKind.Category),
+                        "live playlist categories returned no valid items: " + platform.Id);
+                    var categoryPlaylists = OnlineCatalogBrowser.CategoryPlaylists(categories.Collections[0], 1, 3);
+                    Check(categoryPlaylists.Collections.Count > 0,
+                        "live playlist category could not be opened: " + platform.Id);
+                }
+                Console.WriteLine(platform.Label + ": available catalog browse entries readable");
+            }
+            var discover = OnlineCatalogBrowser.DiscoverTracks(OnlinePlatform.Qishui, 1, 10);
+            Check(discover.Tracks.Count > 0 &&
+                discover.Tracks.All(track => track.Platform == OnlinePlatform.Qishui),
+                "Qishui public discover returned no playable catalog items");
+            var bridgedDiscover = Bridge("search", "qishui", "discover", "-", "1", "3", "flac");
+            Check(bridgedDiscover.Code == 0 && bridgedDiscover.Lines.Count(line => line[0] == "ITEM") == 3,
+                "empty browse keyword sentinel did not survive the bridge protocol");
+            Console.WriteLine("汽水音乐: public discover readable");
         }
     }
 

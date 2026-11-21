@@ -64,15 +64,22 @@ namespace LxMusic.Bridge.Online
             if (collection == null) throw new ArgumentNullException(nameof(collection));
             if (collection.Kind == OnlineCollectionKind.Album)
                 return OnlineCollectionSearch.AlbumTracks(collection, page);
+            if (collection.Kind == OnlineCollectionKind.Ranking)
+                return OnlineCatalogBrowser.RankingTracks(collection, page);
+            if (collection.Kind == OnlineCollectionKind.Category)
+                throw new InvalidOperationException("请先选择分类中的歌单");
             var cookie = _repository.Accounts.Account(collection.Platform)?.Cookie ?? string.Empty;
             OnlineSearchPage result;
             if (ReferenceEquals(collection.Platform, OnlinePlatform.Kugou))
                 result = KugouPlaylistApi.Tracks(collection, page);
             else if (ReferenceEquals(collection.Platform, OnlinePlatform.Netease))
                 result = NeteasePlaylistLoader.Tracks(collection.Id, page, cookie);
+            else if (ReferenceEquals(collection.Platform, OnlinePlatform.Kuwo))
+                result = OnlineCatalogBrowser.KuwoPlaylistTracks(collection, page);
             else
                 result = QqPlaylistTracks(collection, cookie, page);
-            result.Tracks = result.Tracks.OrderBy(t => t.Title, StringComparer.OrdinalIgnoreCase).ToList();
+            if (collection.Kind != OnlineCollectionKind.Ranking)
+                result.Tracks = result.Tracks.OrderBy(t => t.Title, StringComparer.OrdinalIgnoreCase).ToList();
             return result;
         }
 

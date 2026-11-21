@@ -32,7 +32,7 @@ namespace LxMusic.Bridge.Online
         public static readonly OnlinePlatform[] All = { Qq, Kugou, Netease, Kuwo, Migu, Qishui };
 
         public bool SupportsCollections => this == Qq || this == Kugou || this == Netease;
-        public bool HasBuiltInSearch => SupportsCollections || this == Kuwo || this == Migu;
+        public bool HasBuiltInSearch => SupportsCollections || this == Kuwo || this == Migu || this == Qishui;
 
         public bool MatchesSourceId(string sourceId)
         {
@@ -191,13 +191,14 @@ namespace LxMusic.Bridge.Online
         public static readonly OnlineSearchType Albums = new OnlineSearchType("albums", "专辑", "专辑名或歌手");
         public static readonly OnlineSearchType Playlists = new OnlineSearchType("playlists", "在线歌单", "在线歌单名称");
         public static readonly OnlineSearchType Rankings = new OnlineSearchType("rankings", "榜单", "不需要关键词，选中后直接浏览榜单");
+        public static readonly OnlineSearchType Categories = new OnlineSearchType("categories", "歌单分类", "不需要关键词，选中后直接浏览分类");
         public static readonly OnlineSearchType Singers = new OnlineSearchType("singers", "歌手", "歌手名，留空则浏览热门歌手");
 
-        /// <summary>搜索分类下拉里可选的类型：歌曲 / 专辑 / 歌单 / 歌手。</summary>
-        public static readonly OnlineSearchType[] All = { Tracks, Albums, Playlists, Singers };
+        /// <summary>搜索分类下拉里可选的类型：歌曲 / 专辑 / 歌单 / 歌手 / 榜单 / 分类。</summary>
+        public static readonly OnlineSearchType[] All = { Tracks, Albums, Playlists, Singers, Rankings, Categories };
 
-        /// <summary>榜单是独立的浏览入口，不放在搜索分类里。</summary>
-        public bool IsBrowse => ReferenceEquals(this, Rankings);
+        /// <summary>榜单和分类是独立浏览入口，可以不带关键词。</summary>
+        public bool IsBrowse => ReferenceEquals(this, Rankings) || ReferenceEquals(this, Categories);
 
         /// <summary>歌手可以留空（浏览热门歌手），其余类型都要关键词。</summary>
         public bool NeedsKeyword =>

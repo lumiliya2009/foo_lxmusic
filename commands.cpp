@@ -190,6 +190,10 @@ std::string type_label(const std::string& type) {
     if (type == "album") return "专辑";
     if (type == "artist") return "歌手";
     if (type == "playlist") return "歌单";
+    if (type == "featured") return "精选歌单";
+    if (type == "rankings") return "榜单";
+    if (type == "categories") return "歌单分类";
+    if (type == "discover") return "随便看看";
     return type;
 }
 
@@ -204,14 +208,16 @@ std::string site_label(const std::string& site) {
 }
 
 std::string search_playlist_name(const SearchOptions& options) {
-    return "LX " + site_label(options.site) + " " + type_label(options.type) + " - " + options.keyword;
+    auto name = "LX " + site_label(options.site) + " " + type_label(options.type);
+    return options.keyword.empty() ? name : name + " - " + options.keyword;
 }
 
 void fetch_search_page(async_state& state, const SearchOptions& options, int page, abort_callback& abort,
     const SearchPage* previous = nullptr, bool last = false) {
     const auto read = [&](int number) {
         abort.check();
-        auto result = run_bridge({ "search", options.site, options.type, base64url_encode_text(options.keyword),
+        const auto keyword = options.keyword.empty() ? std::string("-") : base64url_encode_text(options.keyword);
+        auto result = run_bridge({ "search", options.site, options.type, keyword,
             std::to_string(number), "30", options.quality, options.source }, abort);
         auto items = bridge_items(result);
         if (items.empty()) return false;
@@ -237,7 +243,7 @@ void fetch_search_page(async_state& state, const SearchOptions& options, int pag
 void show_new_search(async_state& state) {
     const auto index = add_payloads_to_playlist(state.items, search_playlist_name(state.page.options), pfc_infinite, true);
     mark_search_page(index, state.page);
-    remember_search(state.page.options);
+    if (state.page.options.type != "discover") remember_search(state.page.options);
 }
 
 std::vector<SourceOption> source_options(const BridgeResult& result) {
@@ -260,8 +266,18 @@ std::vector<SourceOption> source_options(const BridgeResult& result) {
             if (f[4] == "unavailable") continue;
             // Keep source-declared platforms extensible, with safe CLI IDs.
             if (f[2].empty() || f[2].size() > 32 || f[2].find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_-") != std::string::npos) continue;
-            for (auto& source : sources) if (source.id == f[1])
-                source.sites.push_back({ f[2], base64url_decode(f[3]), f[4].find("album") != std::string::npos, f[4] != "unavailable" });
+            for (auto& source : sources) if (source.id == f[1]) {
+                SourceSite site;
+                site.id = f[2];
+                site.label = base64url_decode(f[3]);
+                site.collections = f[4].find("album") != std::string::npos;
+                site.searchable = f[4] != "unavailable";
+                site.featured = f[4].find("featured") != std::string::npos;
+                site.rankings = f[4].find("rankings") != std::string::npos;
+                site.categories = f[4].find("categories") != std::string::npos;
+                site.discover = f[4].find("discover") != std::string::npos;
+                source.sites.push_back(std::move(site));
+            }
         }
     }
     return sources;
@@ -582,6 +598,32 @@ void command_search() {
         });
 }
 
+void command_browse() {
+    run_task("读取音源",
+        [](async_state& state, threaded_process_status&, abort_callback& abort) {
+            state.result = run_bridge({ "source-options" }, abort);
+        },
+        [](async_state& state) {
+            const auto sources = source_options(state.result);
+            const auto available = std::any_of(sources.begin(), sources.end(), [](const SourceOption& source) {
+                return std::any_of(source.sites.begin(), source.sites.end(), [](const SourceSite& site) {
+                    return site.searchable && site.discover;
+                });
+            });
+            if (!available) {
+                popup_message::g_show("当前音源没有可用于随便看看的站点。", "LX 在线音乐");
+                return;
+            }
+            SearchOptions options;
+            if (!show_browse_dialog(options, sources)) return;
+            run_task("LX 在线音乐随便看看",
+                [options](async_state& browse, threaded_process_status&, abort_callback& abort) {
+                    fetch_search_page(browse, options, 1, abort);
+                },
+                [](async_state& browse) { show_new_search(browse); }, true);
+        });
+}
+
 void command_search_page(t_size playlist, t_size item) {
     try {
         auto playlists = playlist_manager::get();
@@ -626,10 +668,102 @@ void command_search_page(t_size playlist, t_size item) {
                 if (!owns_search_page(target, request->original_state)) return;
                 replace_playlist_payloads(state.items, target, playlists->get_active_playlist() == target);
                 mark_search_page(target, state.page);
-                remember_search(state.page.options);
+                if (state.page.options.type != "discover") remember_search(state.page.options);
             }, true);
     } catch (const std::exception& ex) { popup_message::g_complain("搜索结果翻页失败", ex.what()); }
 }
+
+namespace {
+
+bool active_search_page(t_size& playlist, SearchPage& page) {
+    playlist = playlist_manager::get()->get_active_playlist();
+    if (playlist == pfc_infinite) return false;
+    pfc::array_t<uint8_t> property;
+    if (!playlist_manager_v2::get()->playlist_get_property(playlist, guid_search_page, property) ||
+        property.get_size() == 0 || property.get_size() > 16384) return false;
+    try {
+        page = decode_search_state(std::string(
+            reinterpret_cast<const char*>(property.get_ptr()), property.get_size()));
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+t_size find_page_action(t_size playlist, const std::string& action) {
+    auto playlists = playlist_manager::get();
+    const auto count = playlists->playlist_get_item_count(playlist);
+    for (t_size row = 0; row < count; ++row) {
+        metadb_handle_ptr item;
+        std::string encoded;
+        Payload payload;
+        if (playlists->playlist_get_item_handle(item, playlist, row) &&
+            uri_to_payload(item->get_path(), encoded, &payload) &&
+            payload.is_navigation() && payload.get(pf_id) == action) return row;
+    }
+    return pfc_infinite;
+}
+
+void run_page_action(const std::string& action) {
+    t_size playlist = pfc_infinite;
+    SearchPage page;
+    if (!active_search_page(playlist, page)) {
+        show_status("当前播放列表不是 LX 搜索结果");
+        return;
+    }
+    const auto row = find_page_action(playlist, action);
+    if (row == pfc_infinite) {
+        show_status("当前页没有这个翻页操作");
+        return;
+    }
+    command_search_page(playlist, row);
+}
+
+} // namespace
+
+void command_page_previous() {
+    t_size playlist;
+    SearchPage page;
+    if (!active_search_page(playlist, page)) {
+        show_status("当前播放列表不是 LX 搜索结果");
+        return;
+    }
+    if (page.page <= 1) {
+        show_status("已经是第一页");
+        return;
+    }
+    run_page_action(std::to_string(page.page - 1));
+}
+
+void command_page_next() {
+    t_size playlist;
+    SearchPage page;
+    if (!active_search_page(playlist, page)) {
+        show_status("当前播放列表不是 LX 搜索结果");
+        return;
+    }
+    if (!page.has_next) {
+        show_status("已经是最后一页");
+        return;
+    }
+    run_page_action(std::to_string(page.page + 1));
+}
+
+void command_page_last() {
+    t_size playlist;
+    SearchPage page;
+    if (!active_search_page(playlist, page)) {
+        show_status("当前播放列表不是 LX 搜索结果");
+        return;
+    }
+    if (page.total_pages <= page.page) {
+        show_status("已经是最后一页");
+        return;
+    }
+    run_page_action("last");
+}
+
+void command_page_jump() { run_page_action("jump"); }
 
 void command_manage_sources() {
     run_task("管理音源",
@@ -696,11 +830,20 @@ void command_check_update(bool automatic) {
             if (g_updates_stopping) return;
             g_last_update_check = std::to_string(std::time(nullptr)).c_str();
             if (automatic && !automatic_updates_enabled()) return;
+            std::string changelog;
+            for (const auto& line : state.result.lines) {
+                if (line.fields.size() >= 2 && line.fields[0] == "CHANGELOG") {
+                    try { changelog = base64url_decode(line.fields[1]); } catch (...) {}
+                    break;
+                }
+            }
             for (const auto& line : state.result.lines) {
                 if (line.fields.size() >= 4 && line.fields[0] == "UPDATE") {
                     if (automatic && line.fields[2] == g_notified_update.get().c_str()) return;
                     g_notified_update = line.fields[2].c_str();
-                    const auto message = "发现新版本 " + line.fields[2] + "。\n\n是否下载并安装？下载校验完成后将自动重启 foobar2000。";
+                    auto message = "发现新版本 " + line.fields[2] + "。\n\n";
+                    if (!changelog.empty()) message += "更新内容：\n" + changelog + "\n\n";
+                    message += "是否下载并安装？下载校验完成后将自动重启 foobar2000。";
                     if (MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
                         L"LX 在线音乐更新", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
                     std::vector<wchar_t> host(32768);
@@ -973,7 +1116,20 @@ void command_switch_quality(metadb_handle_list_cref items, const std::string& qu
                     // Create new handle with the new URI
                     auto new_handle = metadb::get()->handle_create(new_uri.c_str(), 0);
                     auto new_payload = decode_payload(new_encoded);
-                    hint_payload_info(new_handle, new_payload);
+                    size_t track_number = 0, track_total = 0;
+                    for (size_t position = 0; position < count; ++position) {
+                        metadb_handle_ptr candidate;
+                        std::string candidate_encoded;
+                        Payload candidate_payload;
+                        if (playlists->playlist_get_item_handle(candidate, active, position) &&
+                            uri_to_payload(candidate->get_path(), candidate_encoded, &candidate_payload) &&
+                            candidate_payload.is_track()) {
+                            ++track_total;
+                            if (position <= pi) ++track_number;
+                        }
+                    }
+                    hint_payload_info(new_handle, new_payload, std::max<size_t>(1, track_number),
+                        std::max<size_t>(track_number, track_total));
 
                     // Replace: remove old, insert new at same position
                     if (!undo_created) {
@@ -1011,6 +1167,7 @@ void command_switch_quality(metadb_handle_list_cref items, const std::string& qu
 
 static const GUID guid_main_group = { 0x418263d2, 0x8a92, 0x493f,{ 0xa2, 0x2d, 0x4c, 0xc4, 0xaa, 0x28, 0xe8, 0x41 } };
 static const GUID guid_search = { 0xd69760c3, 0x7c12, 0x4cd9,{ 0xbd, 0x24, 0xa0, 0xc0, 0x46, 0x91, 0xf7, 0x8e } };
+static const GUID guid_browse = { 0xd69760c4, 0x7c12, 0x4cd9,{ 0xbd, 0x24, 0xa0, 0xc0, 0x46, 0x91, 0xf7, 0x8f } };
 static const GUID guid_import_file = { 0x46b1f808, 0xee91, 0x4418,{ 0x8c, 0x2b, 0xc5, 0x4d, 0xe3, 0x5f, 0xc5, 0x9f } };
 static const GUID guid_import_url = { 0xc5ad0577, 0x594f, 0x4b75,{ 0x8c, 0xf4, 0xeb, 0xd4, 0x15, 0xd8, 0xe8, 0x93 } };
 static const GUID guid_status = { 0xd745217e, 0x38c1, 0x4b35,{ 0xa2, 0x3c, 0x91, 0x61, 0xf2, 0x5f, 0xbb, 0x8f } };
@@ -1020,24 +1177,35 @@ static const GUID guid_manage = { 0x85d64b43, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e,
 static const GUID guid_update = { 0x85d64b44, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 const GUID guid_back = { 0x85d64b45, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 static const GUID guid_settings = { 0x85d64b48, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_page_previous = { 0x85d64b4a, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_page_next = { 0x85d64b4b, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_page_last = { 0x85d64b4c, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_page_jump = { 0x85d64b4d, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 static mainmenu_group_popup_factory g_main_group(guid_main_group, mainmenu_groups::file,
     mainmenu_commands::sort_priority_dontcare, "LX 在线音乐");
 
 class main_commands : public mainmenu_commands {
 public:
-    enum { search, manage, update, lyrics, back, settings, count };
+    enum { search, browse, page_previous, page_next, page_last, page_jump, manage, update, lyrics, back, settings, count };
     t_uint32 get_command_count() override { return count; }
     GUID get_command(t_uint32 index) override {
-        static const GUID values[] = { guid_search, guid_manage, guid_update, guid_lyrics_main, guid_back, guid_settings };
+        static const GUID values[] = { guid_search, guid_browse, guid_page_previous, guid_page_next,
+            guid_page_last, guid_page_jump, guid_manage, guid_update, guid_lyrics_main, guid_back, guid_settings };
         return index < count ? values[index] : pfc::guid_null;
     }
     void get_name(t_uint32 index, pfc::string_base& out) override {
-        static const char* values[] = { "搜索在线音乐…", "管理音源…", "检查更新", "获取所选歌曲歌词", "返回上一层", "设置…" };
+        static const char* values[] = { "搜索在线音乐…", "随便看看…", "上一页", "下一页",
+            "跳到尾页", "页数跳转…", "管理音源…", "检查更新", "获取所选歌曲歌词", "返回上一层", "设置…" };
         if (index < count) out = values[index];
     }
     bool get_description(t_uint32 index, pfc::string_base& out) override {
-        if (index == lyrics) out = "获取播放列表中所选歌曲的在线歌词；可在 foobar2000 键盘快捷键设置中绑定 Shift+Enter。";
+        if (index == browse) out = "选择音源和站点后浏览榜单或公开推荐，并直接显示在新的播放列表中。";
+        else if (index == page_previous) out = "切换到当前 LX 搜索结果的上一页。可在快捷键设置中绑定按键。";
+        else if (index == page_next) out = "切换到当前 LX 搜索结果的下一页。可在快捷键设置中绑定按键。";
+        else if (index == page_last) out = "切换到当前 LX 搜索结果能够访问的尾页。可在快捷键设置中绑定按键。";
+        else if (index == page_jump) out = "输入页码并跳转当前 LX 搜索结果。可在快捷键设置中绑定按键。";
+        else if (index == lyrics) out = "获取播放列表中所选歌曲的在线歌词；可在 foobar2000 键盘快捷键设置中绑定 Shift+Enter。";
         else if (index == back) out = "返回打开集合前的播放列表。默认退格键；在快捷键设置中绑定其他按键后，默认退格键自动停用。";
         else out = "LX 在线音乐搜索与音源管理。";
         return index < count;
@@ -1046,6 +1214,11 @@ public:
     void execute(t_uint32 index, service_ptr_t<service_base>) override {
         switch (index) {
         case search: command_search(); break;
+        case browse: command_browse(); break;
+        case page_previous: command_page_previous(); break;
+        case page_next: command_page_next(); break;
+        case page_last: command_page_last(); break;
+        case page_jump: command_page_jump(); break;
         case manage: command_manage_sources(); break;
         case update: command_check_update(); break;
         case settings: show_component_preferences(); break;

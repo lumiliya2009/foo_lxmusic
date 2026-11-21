@@ -67,6 +67,7 @@ static class UpdateRegression
                 ["size"] = update.Size, ["digest"] = update.Sha256, ["browser_download_url"] = update.PackageUrl };
         };
         return new JObject { ["tag_name"] = "v0.1.8", ["html_url"] = Update(bytes).Url,
+            ["body"] = "- 支持了咪咕和汽水音乐的搜索和播放\n- 修复其他问题",
             ["assets"] = new JArray(asset("x86"), asset("x64")) };
     }
 
@@ -74,6 +75,14 @@ static class UpdateRegression
     {
         var bytes = Package();
         var release = Release(bytes);
+        var parsed = UpdateChecker.Parse(release.ToString(), "0.1.7", "x86");
+        Check(parsed.Changelog.Contains("咪咕和汽水音乐") && parsed.Changelog.Contains("修复其他问题"),
+            "release changelog was not retained");
+        var manifest = (JObject)release.DeepClone();
+        manifest.Remove("body");
+        manifest["changelog"] = "静态更新清单";
+        Check(UpdateChecker.Parse(manifest.ToString(), "0.1.7", "x64").Changelog == "静态更新清单",
+            "static manifest changelog was ignored");
         Check(UpdateChecker.Parse(release.ToString(), "0.1.7", "x86").PackageName.EndsWith("fb1-x86.fb2k-component"), "x86 asset selection failed");
         Check(UpdateChecker.Parse(release.ToString(), "0.1.7", "x64").PackageName.EndsWith("fb2-x64.fb2k-component"), "x64 asset selection failed");
         Check(UpdateChecker.Parse(release.ToString(), "0.1.8", "x64") == null, "same version offered");

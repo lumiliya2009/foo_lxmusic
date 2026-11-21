@@ -4,7 +4,7 @@ namespace lxmusic {
 
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 constexpr const char* kSchemeSuffix = ".lxmusic";
-constexpr const char* kVersion = "0.1.11";
+constexpr const char* kVersion = "0.1.12";
 
 enum PayloadField : size_t {
     pf_version = 0,
@@ -71,7 +71,10 @@ std::vector<SearchOptions> decode_search_history(const std::string& data);
 std::string update_search_history(const std::string& data, const SearchOptions& options);
 void remember_search(const SearchOptions& options);
 
-struct SourceSite { std::string id, label; bool collections = false, searchable = true; };
+struct SourceSite {
+    std::string id, label;
+    bool collections = false, searchable = true, featured = false, rankings = false, categories = false, discover = false;
+};
 struct SourceOption {
     std::string id, name, url;
     bool active = false;
@@ -89,7 +92,12 @@ Payload decode_payload(const std::string& encoded);
 std::string payload_to_uri(const std::string& encoded);
 bool uri_to_payload(const char* path, std::string& encoded, Payload* decoded = nullptr);
 void payload_to_info(const Payload& payload, file_info& info);
-void hint_payload_info(metadb_handle_ptr handle, const Payload& payload);
+std::string format_track_display_title(const Payload& payload, const std::string& naming_template,
+    size_t number = 1, size_t total = 1);
+std::string download_naming_template();
+bool apply_naming_to_search();
+void payload_to_info(const Payload& payload, file_info& info, size_t number, size_t total);
+void hint_payload_info(metadb_handle_ptr handle, const Payload& payload, size_t number = 1, size_t total = 1);
 void refresh_playlist_payload_info();
 void install_collection_actions(t_size playlist);
 
@@ -120,6 +128,7 @@ std::string payload_for_handle(metadb_handle_ptr handle);
 std::string lyric_payload_for_handle(metadb_handle_ptr handle);
 
 bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources);
+bool show_browse_dialog(SearchOptions& options, const std::vector<SourceOption>& sources);
 bool show_page_dialog(const SearchPage& state, int& page);
 SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected);
 bool show_source_editor(const std::string& title, std::string& script, std::string& revision);
@@ -131,6 +140,11 @@ bool show_download_dialog(std::vector<std::string>& payloads, std::string& folde
     std::string& naming_template, DownloadOptions& options);
 
 void command_search();
+void command_browse();
+void command_page_previous();
+void command_page_next();
+void command_page_last();
+void command_page_jump();
 void command_search_page(t_size playlist, t_size item);
 void command_import_file();
 void command_import_url();

@@ -121,7 +121,7 @@ namespace LxMusic.Bridge.Online
                         string.Equals(action, "search", StringComparison.OrdinalIgnoreCase) || string.Equals(action, "musicSearch", StringComparison.OrdinalIgnoreCase));
                     if (!searchable) continue;
                     Emit("SITE", source.Id, platform.Id, PayloadCodec.EncodeText(label),
-                        platform.SupportsCollections ? "track,album,artist,playlist" : "track");
+                        OnlineCatalogBrowser.Capabilities(platform));
                 }
             }
         }
@@ -131,8 +131,12 @@ namespace LxMusic.Bridge.Online
             if (args.Length < 3) throw new InvalidOperationException("缺少当前版本号");
             var update = UpdateChecker.Check(args[2], args.Length > 3 ? args[3] : null);
             if (update == null) Ok("当前已是最新版本（" + args[2] + "）");
-            else Emit("UPDATE", PayloadCodec.EncodeText(update.Url), update.Version,
-                PayloadCodec.EncodeText(JsonConvert.SerializeObject(update)));
+            else
+            {
+                Emit("CHANGELOG", PayloadCodec.EncodeText(update.Changelog ?? string.Empty));
+                Emit("UPDATE", PayloadCodec.EncodeText(update.Url), update.Version,
+                    PayloadCodec.EncodeText(JsonConvert.SerializeObject(update)));
+            }
         }
 
         private static void PrepareUpdate(string[] args)
@@ -180,11 +184,23 @@ namespace LxMusic.Bridge.Online
             }
             if (repository.Sources.State.Imported && !repository.Sources.State.Descriptor.Supports(platform))
                 throw new InvalidOperationException("当前音源不支持" + platform.Label);
-            if (type != "track" && !platform.SupportsCollections)
+            if ((type == "album" || type == "artist" || (type == "playlist" && query.Length > 0)) &&
+                !platform.SupportsCollections)
                 throw new InvalidOperationException(platform.Label + "目前支持单曲搜索");
+            if (type == "rankings" && !OnlineCatalogBrowser.SupportsRankings(platform))
+                throw new InvalidOperationException(platform.Label + "目前不支持浏览榜单");
+            if (type == "categories" && !OnlineCatalogBrowser.SupportsCategories(platform))
+                throw new InvalidOperationException(platform.Label + "目前不支持浏览歌单分类");
+            if (type == "featured" && !OnlineCatalogBrowser.SupportsFeaturedPlaylists(platform))
+                throw new InvalidOperationException(platform.Label + "目前不支持浏览精选歌单");
+            if (type != "track" && type != "album" && type != "artist" &&
+                type != "playlist" && type != "featured" && type != "rankings" &&
+                type != "categories" && type != "discover")
+                throw new InvalidOperationException("不支持的搜索类型：" + type);
 
             if (type == "track")
             {
+                if (query.Length == 0) throw new InvalidOperationException("请输入歌曲名或歌手");
                 var results = repository.Search(platform, query, page, limit);
                 foreach (var track in results.Tracks)
                     Emit("ITEM", PayloadCodec.FromTrack(track, quality));
@@ -192,8 +208,15 @@ namespace LxMusic.Bridge.Online
             }
             else if (type == "album" || type == "playlist")
             {
-                var searchType = type == "album" ? OnlineSearchType.Albums : OnlineSearchType.Playlists;
-                var results = OnlineCollectionSearch.Search(platform, searchType, query, page, limit);
+                OnlineCollectionPage results;
+                if (type == "playlist" && query.Length == 0)
+                    results = OnlineCatalogBrowser.FeaturedPlaylists(platform, page, limit);
+                else
+                {
+                    if (query.Length == 0) throw new InvalidOperationException("请输入搜索内容");
+                    var searchType = type == "album" ? OnlineSearchType.Albums : OnlineSearchType.Playlists;
+                    results = OnlineCollectionSearch.Search(platform, searchType, query, page, limit);
+                }
                 foreach (var collection in results.Collections)
                     Emit("ITEM", PayloadCodec.FromCollection(collection, type, quality));
                 EmitPage(results, limit);
@@ -205,7 +228,36 @@ namespace LxMusic.Bridge.Online
                     Emit("ITEM", PayloadCodec.FromCollection(collection, "artist", quality));
                 EmitPage(results, limit);
             }
-            else throw new InvalidOperationException("不支持的搜索类型：" + type);
+            else if (type == "featured")
+            {
+                var results = OnlineCatalogBrowser.FeaturedPlaylists(platform, page, limit);
+                foreach (var collection in results.Collections)
+                    Emit("ITEM", PayloadCodec.FromCollection(collection, "playlist", quality));
+                EmitPage(results, limit);
+            }
+            else if (type == "rankings" || type == "categories")
+            {
+                var results = type == "rankings"
+                    ? OnlineCatalogBrowser.Rankings(platform, page, limit)
+                    : OnlineCatalogBrowser.Categories(platform, page, limit);
+                foreach (var collection in results.Collections)
+                    Emit("ITEM", PayloadCodec.FromCollection(collection, "playlist", quality));
+                EmitPage(results, limit);
+            }
+            else if (ReferenceEquals(platform, OnlinePlatform.Qishui))
+            {
+                var tracks = OnlineCatalogBrowser.DiscoverTracks(platform, page, limit);
+                foreach (var track in tracks.Tracks)
+                    Emit("ITEM", PayloadCodec.FromTrack(track, quality));
+                EmitPage(tracks, limit);
+            }
+            else
+            {
+                var results = OnlineCatalogBrowser.Rankings(platform, page, limit);
+                foreach (var collection in results.Collections)
+                    Emit("ITEM", PayloadCodec.FromCollection(collection, "playlist", quality));
+                EmitPage(results, limit);
+            }
             Ok("搜索完成");
         }
 
@@ -221,6 +273,14 @@ namespace LxMusic.Bridge.Online
             var quality = args[3];
             OnlineSearchPage page;
             var collection = payload.ToCollection();
+            if (payload.Kind == "playlist" && collection.Kind == OnlineCollectionKind.Category)
+            {
+                var groups = OnlineCatalogBrowser.CategoryPlaylists(collection, 1, 50);
+                foreach (var item in groups.Collections)
+                    Emit("ITEM", PayloadCodec.FromCollection(item, "playlist", quality));
+                Ok("已打开分类“" + collection.Title + "”");
+                return;
+            }
             if (payload.Kind == "album")
                 page = OnlineCollectionSearch.AlbumTracks(collection, 1);
             else if (payload.Kind == "playlist")
@@ -463,7 +523,8 @@ namespace LxMusic.Bridge.Online
 
         internal OnlineCollection ToCollection()
         {
-            var kind = Kind == "album" ? OnlineCollectionKind.Album : OnlineCollectionKind.Playlist;
+            OnlineCollectionKind kind;
+            if (!Enum.TryParse(CollectionKind, true, out kind)) kind = OnlineCollectionKind.Playlist;
             return new OnlineCollection
             {
                 Platform = OnlinePlatform.FromId(PlatformId.Length == 0 ? LxSourceId : PlatformId),
@@ -514,7 +575,8 @@ namespace LxMusic.Bridge.Online
         }
 
         internal static string EncodeText(string value) => Base64Url(Encoding.UTF8.GetBytes(value ?? string.Empty));
-        internal static string DecodeText(string value) => Encoding.UTF8.GetString(FromBase64Url(value ?? string.Empty));
+        internal static string DecodeText(string value) =>
+            value == "-" ? string.Empty : Encoding.UTF8.GetString(FromBase64Url(value ?? string.Empty));
 
         private static string EncodeFields(IEnumerable<string> values)
         {

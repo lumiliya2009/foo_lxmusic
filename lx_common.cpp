@@ -166,8 +166,68 @@ bool uri_to_payload(const char* path, std::string& encoded, Payload* decoded) {
     return true;
 }
 
+std::string format_track_display_title(const Payload& payload, const std::string& naming_template,
+    size_t number, size_t total) {
+    if (!payload.is_track()) return payload.get(pf_title);
+    if (number < 1) number = 1;
+    if (total < number) total = number;
+    if (naming_template.empty()) throw std::runtime_error("请输入文件命名格式");
+
+    int width = std::max(2, static_cast<int>(std::to_string(total).size()));
+    std::string sequence = std::to_string(number);
+    if (static_cast<int>(sequence.size()) < width) sequence.insert(0, width - sequence.size(), '0');
+    const auto value = [&](const std::string& token) {
+        if (token == "序号") return sequence;
+        if (token == "曲名" || token == "文件名") {
+            const auto& title = payload.get(pf_title);
+            return title.empty() ? std::string("未命名歌曲") : title;
+        }
+        if (token == "艺术家") {
+            const auto& artist = payload.get(pf_artist);
+            return artist.empty() ? std::string("未知艺术家") : artist;
+        }
+        if (token == "专辑名") {
+            const auto& album = payload.get(pf_album);
+            return album.empty() ? std::string("未知专辑") : album;
+        }
+        if (token == "音质") {
+            const auto& quality = payload.get(pf_preferred_quality);
+            return quality.empty() ? std::string("未知音质") : quality;
+        }
+        throw std::runtime_error("不支持的命名字段：{" + token + "}");
+    };
+
+    std::string result;
+    for (size_t i = 0; i < naming_template.size(); ++i) {
+        if (naming_template[i] == '}') throw std::runtime_error("命名字段的大括号不完整");
+        if (naming_template[i] != '{') { result.push_back(naming_template[i]); continue; }
+        const auto end = naming_template.find('}', i + 1);
+        if (end == std::string::npos) throw std::runtime_error("命名字段的大括号不完整");
+        result += value(naming_template.substr(i + 1, end - i - 1));
+        i = end;
+    }
+    for (auto& ch : result)
+        if (static_cast<unsigned char>(ch) < 32 || std::string("\\/:*?\"<>|").find(ch) != std::string::npos) ch = '_';
+    while (!result.empty() && (result.back() == ' ' || result.back() == '.')) result.pop_back();
+    if (result.empty()) result = "在线音乐";
+    static const char* reserved[] = { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5",
+        "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
+    if (std::any_of(std::begin(reserved), std::end(reserved),
+        [&](const char* name) { return _stricmp(result.c_str(), name) == 0; })) result.insert(result.begin(), '_');
+    return result;
+}
+
 void payload_to_info(const Payload& payload, file_info& info) {
-    info.meta_set("TITLE", payload.get(pf_title).c_str());
+    payload_to_info(payload, info, 1, 1);
+}
+
+void payload_to_info(const Payload& payload, file_info& info, size_t number, size_t total) {
+    auto title = payload.get(pf_title);
+    if (payload.is_track() && apply_naming_to_search()) {
+        try { title = format_track_display_title(payload, download_naming_template(), number, total); }
+        catch (...) { title = payload.get(pf_title); }
+    }
+    info.meta_set("TITLE", title.c_str());
     if (!payload.get(pf_artist).empty()) info.meta_set("ARTIST", payload.get(pf_artist).c_str());
     if (!payload.get(pf_album).empty()) info.meta_set("ALBUM", payload.get(pf_album).c_str());
     info.meta_set("LX_SOURCE", payload.get(pf_platform_label).c_str());
@@ -175,7 +235,9 @@ void payload_to_info(const Payload& payload, file_info& info) {
     info.meta_set("LX_ID", payload.get(pf_id).c_str());
     if (!payload.get(pf_preferred_quality).empty()) info.meta_set("LX_QUALITY", payload.get(pf_preferred_quality).c_str());
     if (payload.is_navigation()) {
-        info.set_length(0);
+        info.meta_set("ARTIST", " ");
+        info.meta_set("ALBUM", " ");
+        info.set_length(0.001);
         info.info_set("encoding", "LX search navigation - Enter to open");
     } else if (payload.is_collection()) {
         info.meta_set("ALBUM", payload.get(pf_platform_label).c_str());
@@ -192,9 +254,9 @@ void payload_to_info(const Payload& payload, file_info& info) {
 namespace {
 
 void add_payload_info_hint(const metadb_hint_list_v2::ptr& hints, metadb_handle_ptr handle,
-    const Payload& payload, t_filetimestamp browse_timestamp) {
+    const Payload& payload, t_filetimestamp browse_timestamp, size_t number = 1, size_t total = 1) {
     file_info_impl info;
-    payload_to_info(payload, info);
+    payload_to_info(payload, info, number, total);
 
     // lxmusic:// items have no filesystem timestamp. In foobar2000 v2 a
     // non-fresh hint with invalid stats is intentionally ignored, leaving the
@@ -207,9 +269,9 @@ void add_payload_info_hint(const metadb_hint_list_v2::ptr& hints, metadb_handle_
 
 } // namespace
 
-void hint_payload_info(metadb_handle_ptr handle, const Payload& payload) {
+void hint_payload_info(metadb_handle_ptr handle, const Payload& payload, size_t number, size_t total) {
     auto hints = metadb_hint_list_v2::create();
-    add_payload_info_hint(hints, handle, payload, foobar2000_io::filetimestamp_from_system_timer());
+    add_payload_info_hint(hints, handle, payload, foobar2000_io::filetimestamp_from_system_timer(), number, total);
     hints->on_done();
 }
 
@@ -223,12 +285,23 @@ void refresh_playlist_payload_info() {
         install_collection_actions(playlist);
         metadb_handle_list items;
         playlists->playlist_get_all_items(playlist, items);
+        size_t track_total = 0;
+        for (t_size index = 0; index < items.get_count(); ++index) {
+            try {
+                std::string encoded;
+                Payload payload;
+                if (uri_to_payload(items[index]->get_path(), encoded, &payload) && payload.is_track()) ++track_total;
+            } catch (...) {}
+        }
+        size_t track_number = 0;
         for (t_size index = 0; index < items.get_count(); ++index) {
             try {
                 std::string encoded;
                 Payload payload;
                 if (!uri_to_payload(items[index]->get_path(), encoded, &payload)) continue;
-                add_payload_info_hint(hints, items[index], payload, browse_timestamp);
+                const auto number = payload.is_track() ? ++track_number : size_t(1);
+                add_payload_info_hint(hints, items[index], payload, browse_timestamp, number,
+                    payload.is_track() ? track_total : size_t(1));
                 have_hints = true;
             } catch (...) {
                 // A malformed legacy entry must not prevent foobar2000 startup.
@@ -448,11 +521,18 @@ void replace_playlist_payloads(const std::vector<std::string>& payloads, t_size 
     metadb_handle_list items;
     auto hints = metadb_hint_list_v2::create();
     const auto browse_timestamp = foobar2000_io::filetimestamp_from_system_timer();
+    size_t track_total = 0;
+    for (const auto& encoded : payloads) {
+        if (decode_payload(encoded).is_track()) ++track_total;
+    }
+    size_t track_number = 0;
     for (const auto& encoded : payloads) {
         const auto payload = decode_payload(encoded);
         const auto uri = payload_to_uri(encoded);
         auto handle = metadb::get()->handle_create(uri.c_str(), 0);
-        add_payload_info_hint(hints, handle, payload, browse_timestamp);
+        const auto number = payload.is_track() ? ++track_number : size_t(1);
+        add_payload_info_hint(hints, handle, payload, browse_timestamp, number,
+            payload.is_track() ? track_total : size_t(1));
         items.add_item(handle);
     }
     // Commit before exposing the handles to the playlist, so the first title

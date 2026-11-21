@@ -14,6 +14,32 @@ int main() {
         auto decoded = decode_search_state(encoded);
         check(decoded.options.keyword == options.keyword && decoded.options.source == options.source && decoded.options.type == "album", "search state lost Unicode/quotes/source/type");
         check(decoded.page == 1 && decoded.total_pages == 3 && decoded.total_items == 65 && decoded.has_next, "search state lost pagination");
+        auto browse = options;
+        browse.type = "playlist";
+        browse.keyword.clear();
+        page.options = browse;
+        check(decode_search_state(encode_search_state(page)).options.keyword.empty(),
+            "browse page lost empty keyword");
+        browse.type = "rankings";
+        page.options = browse;
+        check(decode_search_state(encode_search_state(page)).options.type == "rankings",
+            "ranking browse type was rejected");
+        browse.type = "categories";
+        page.options = browse;
+        check(decode_search_state(encode_search_state(page)).options.type == "categories",
+            "category browse type was rejected");
+        browse.type = "featured";
+        page.options = browse;
+        check(decode_search_state(encode_search_state(page)).options.type == "featured",
+            "featured playlist browse type was rejected");
+        browse.type = "discover";
+        page.options = browse;
+        check(decode_search_state(encode_search_state(page)).options.type == "discover",
+            "discover browse type was rejected");
+        browse.type = "track";
+        page.options = browse;
+        rejects([&] { encode_search_state(page); }, "empty keyword accepted for track search");
+        page.options = options;
         rejects([&] { decode_search_state("broken"); }, "malformed state accepted");
         rejects([&] { decode_search_state(base64url_encode_text(base64url_decode(encoded) + " trailing")); }, "trailing state accepted");
         auto bad = page; bad.options.source = "bad id";
@@ -70,6 +96,27 @@ int main() {
         check(entries[0].source != entries[1].source && entries[0].keyword == entries[1].keyword, "different sources merged history");
         check(decode_search_history("broken\n" + history).size() == 20, "corrupt history discarded valid entries");
         check(decode_search_history(std::string(600000, 'x')).empty(), "oversized history was processed");
+        Payload display;
+        display.fields.resize(pf_count);
+        display.fields[pf_kind] = "track";
+        display.fields[pf_title] = "曲名";
+        display.fields[pf_artist] = "歌手";
+        display.fields[pf_album] = "专辑";
+        display.fields[pf_preferred_quality] = "flac";
+        check(format_track_display_title(display, "{序号} - {曲名} - {艺术家}", 2, 12) ==
+            "02 - 曲名 - 歌手", "search result display ignored naming template");
+        check(format_track_display_title(display, "{专辑名}_{序号}_{曲名}_{音质}", 1, 99) ==
+            "专辑_01_曲名_flac", "search result display lost naming fields");
+        check(format_track_display_title(display, "{文件名}", 1, 1) == "曲名",
+            "search result display lost filename alias");
+        rejects([&] { format_track_display_title(display, "{未知}", 1, 1); },
+            "unsupported display naming field was accepted");
+        Payload collection;
+        collection.fields.resize(pf_count);
+        collection.fields[pf_kind] = "album";
+        collection.fields[pf_title] = "专辑搜索结果";
+        check(format_track_display_title(collection, "{序号} - {曲名}", 3, 30) == "专辑搜索结果",
+            "collection result was formatted as a track filename");
         std::cout << checks << " search state/history regression checks passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

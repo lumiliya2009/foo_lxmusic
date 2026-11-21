@@ -19,6 +19,7 @@ cfg_bool g_download_cleanup({ 0x628a3daa, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x
 cfg_int g_download_workers({ 0x628a3dab, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, 3);
 cfg_bool g_download_overrides({ 0x628a3dac, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
 cfg_bool g_auto_updates({ 0x628a3dad, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
+cfg_bool g_apply_search_naming({ 0x628a3db0, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x13 } }, false);
 const GUID guid_preferences = { 0x85d64b47, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 std::string dialog_text(HWND dialog, UINT id) {
@@ -43,6 +44,15 @@ void fill_download_naming(HWND control, const std::string& current) {
     const pfc::stringcvt::string_wide_from_utf8 saved(current.c_str());
     if (naming.FindStringExact(-1, saved) == CB_ERR) naming.AddString(saved);
     naming.SetWindowText(saved);
+}
+
+const char* const search_types[] = { "track", "album", "artist", "playlist", "featured", "rankings", "categories" };
+const wchar_t* const search_type_names[] = { L"单曲", L"专辑", L"歌手", L"歌单", L"精选歌单", L"榜单", L"歌单分类" };
+
+int search_type_index(const std::string& type) {
+    for (int index = 0; index < 7; ++index)
+        if (type == search_types[index]) return index;
+    return 0;
 }
 
 class search_dialog : public CDialogImpl<search_dialog> {
@@ -84,8 +94,8 @@ public:
             std::string label = entry.site;
             for (const auto& saved_source : sources) for (const auto& site : saved_source.sites)
                 if (site.id == entry.site) label = site.label;
-            label = entry.keyword + "（" + label + " / " +
-                (entry.type == "album" ? "专辑" : entry.type == "artist" ? "歌手" : entry.type == "playlist" ? "歌单" : "单曲") + "）";
+            const auto type = pfc::stringcvt::string_utf8_from_wide(search_type_names[search_type_index(entry.type)]);
+            label = (entry.keyword.empty() ? "浏览" : entry.keyword) + "（" + label + " / " + type.get_ptr() + "）";
             keyword.AddString(pfc::stringcvt::string_wide_from_utf8(label.c_str()));
         }
         uSetDlgItemText(*this, IDC_LX_KEYWORD, g_search_keyword.get().c_str());
@@ -128,15 +138,25 @@ public:
         auto type = CComboBox(GetDlgItem(IDC_LX_TYPE));
         type.ResetContent();
         const auto site = SelectedSite();
-        type.AddString(L"单曲");
-        if (site && site->collections) {
-            type.AddString(L"专辑"); type.AddString(L"歌手"); type.AddString(L"歌单");
-        }
-        type.SetCurSel(site && site->collections ? std::clamp(static_cast<int>(g_search_type), 0, 3) : 0);
+        const auto add = [&](int index) {
+            const int row = type.AddString(search_type_names[index]);
+            type.SetItemData(row, static_cast<DWORD_PTR>(index));
+        };
+        add(0);
+        int selected_row = 0;
+        const auto add_collection = [&](int index) {
+            add(index);
+            if (static_cast<int>(g_search_type) == index) selected_row = type.GetCount() - 1;
+        };
+        if (site && site->collections) { add_collection(1); add_collection(2); add_collection(3); }
+        if (site && site->featured) add_collection(4);
+        if (site && site->rankings) add_collection(5);
+        if (site && site->categories) add_collection(6);
+        type.SetCurSel(selected_row);
         GetDlgItem(IDOK).EnableWindow(site != nullptr && site->searchable);
         uSetDlgItemText(*this, IDC_LX_STATUS, !site ? "当前音源没有可搜索的站点。" :
             !site->searchable ? "音源支持此站点的播放解析，但未提供搜索接口。" :
-            site->collections ? "结果中按回车或双击：打开集合，播放歌曲。" : "此站点支持单曲搜索，结果中按回车播放。" );
+            site->collections || site->rankings || site->categories ? "可搜索，也可浏览精选歌单、榜单和歌单分类。" : "此站点支持单曲搜索，结果中按回车播放。" );
     }
     LRESULT OnSourceChanged(WORD, WORD, HWND, BOOL&) { FillSites(); return 0; }
     LRESULT OnSiteChanged(WORD, WORD, HWND, BOOL&) {
@@ -164,9 +184,14 @@ public:
             if (sources[i].id == entry.source) CComboBox(GetDlgItem(IDC_LX_SOURCE)).SetCurSel(static_cast<int>(i));
         preferred_site = entry.site;
         FillSites();
-        const int type = entry.type == "album" ? 1 : entry.type == "artist" ? 2 : entry.type == "playlist" ? 3 : 0;
         auto types = CComboBox(GetDlgItem(IDC_LX_TYPE));
-        types.SetCurSel(type < types.GetCount() ? type : 0);
+        int selected_type = 0;
+        for (int row = 0; row < types.GetCount(); ++row)
+            if (static_cast<int>(types.GetItemData(row)) == search_type_index(entry.type)) {
+                selected_type = row;
+                break;
+            }
+        types.SetCurSel(selected_type);
         uSetDlgItemText(*this, IDC_LX_KEYWORD, entry.keyword.c_str());
         CComboBox(GetDlgItem(IDC_LX_KEYWORD)).SetEditSel(0, -1);
         return 0;
@@ -178,23 +203,120 @@ public:
         const auto first = options.keyword.find_first_not_of(" \t\r\n");
         options.keyword = first == std::string::npos ? std::string() :
             options.keyword.substr(first, options.keyword.find_last_not_of(" \t\r\n") - first + 1);
-        if (options.keyword.empty()) {
-            MessageBoxW(L"请输入搜索关键词。", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
-            GetDlgItem(IDC_LX_KEYWORD).SetFocus();
-            return 0;
-        }
-        static const char* types[] = { "track", "album", "artist", "playlist" };
         const auto source = SelectedSource();
         const auto site = SelectedSite();
         if (!source || !site || !site->searchable) return 0;
-        const int type = std::clamp(CComboBox(GetDlgItem(IDC_LX_TYPE)).GetCurSel(), 0, 3);
+        auto types = CComboBox(GetDlgItem(IDC_LX_TYPE));
+        const int row = types.GetCurSel();
+        const int type = row >= 0 ? static_cast<int>(types.GetItemData(row)) : 0;
+        if (type < 0 || type > 6) return 0;
+        const bool browse = type == 3 || type == 4 || type == 5 || type == 6;
+        if (options.keyword.empty() && !browse) {
+            MessageBoxW(L"请输入搜索关键词；歌单、榜单和分类可以留空浏览。", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
+            GetDlgItem(IDC_LX_KEYWORD).SetFocus();
+            return 0;
+        }
         options.source = source->id;
         options.site = site->id;
-        options.type = types[type];
+        options.type = search_types[type];
         options.quality = "flac";
         g_search_site_id = options.site.c_str();
         g_search_type = type;
         g_search_keyword = options.keyword.c_str();
+        EndDialog(IDOK);
+        return 0;
+    }
+
+    LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
+};
+
+class browse_dialog : public CDialogImpl<browse_dialog> {
+public:
+    enum { IDD = IDD_LX_BROWSE };
+    SearchOptions options;
+    std::vector<SourceOption> sources;
+    std::vector<size_t> visible_sites;
+
+    BEGIN_MSG_MAP(browse_dialog)
+        MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_HANDLER(IDC_LX_SOURCE, CBN_SELCHANGE, OnSourceChanged)
+        COMMAND_HANDLER(IDC_LX_SITE, CBN_SELCHANGE, OnSiteChanged)
+        COMMAND_ID_HANDLER(IDOK, OnOK)
+        COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
+    END_MSG_MAP()
+
+    BOOL OnInitDialog(CWindow, LPARAM) {
+        CenterWindow(GetParent());
+        auto combo = CComboBox(GetDlgItem(IDC_LX_SOURCE));
+        int selected = 0;
+        for (size_t index = 0; index < sources.size(); ++index) {
+            const auto supported = std::any_of(sources[index].sites.begin(), sources[index].sites.end(),
+                [](const SourceSite& site) { return site.searchable && site.discover; });
+            if (!supported) continue;
+            const int row = combo.AddString(pfc::stringcvt::string_wide_from_utf8(sources[index].name.c_str()));
+            combo.SetItemData(row, static_cast<DWORD_PTR>(index));
+            if (sources[index].active) selected = row;
+        }
+        combo.SetCurSel(selected);
+        FillSites();
+        GetDlgItem(IDC_LX_SITE).SetFocus();
+        return FALSE;
+    }
+
+    const SourceOption* SelectedSource() const {
+        auto combo = CComboBox(GetDlgItem(IDC_LX_SOURCE));
+        const int row = combo.GetCurSel();
+        if (row < 0) return nullptr;
+        const auto index = static_cast<size_t>(combo.GetItemData(row));
+        return index < sources.size() ? &sources[index] : nullptr;
+    }
+
+    const SourceSite* SelectedSite() const {
+        auto combo = CComboBox(GetDlgItem(IDC_LX_SITE));
+        const int row = combo.GetCurSel();
+        if (row < 0) return nullptr;
+        const auto index = static_cast<size_t>(combo.GetItemData(row));
+        return index < visible_sites.size() ? &SelectedSource()->sites[visible_sites[index]] : nullptr;
+    }
+
+    void FillSites() {
+        visible_sites.clear();
+        auto combo = CComboBox(GetDlgItem(IDC_LX_SITE));
+        combo.ResetContent();
+        const auto preferred = std::string(g_search_site_id.get().c_str());
+        int selected = 0;
+        if (const auto source = SelectedSource()) {
+            for (size_t index = 0; index < source->sites.size(); ++index) {
+                const auto& site = source->sites[index];
+                if (!site.searchable || !site.discover) continue;
+                const int row = combo.AddString(pfc::stringcvt::string_wide_from_utf8(site.label.c_str()));
+                combo.SetItemData(row, static_cast<DWORD_PTR>(visible_sites.size()));
+                if (site.id == preferred) selected = row;
+                visible_sites.push_back(index);
+            }
+        }
+        combo.SetCurSel(combo.GetCount() > 0 ? selected : -1);
+        const auto site = SelectedSite();
+        GetDlgItem(IDOK).EnableWindow(site ? TRUE : FALSE);
+        uSetDlgItemText(*this, IDC_LX_STATUS, !site ?
+            "当前音源没有可随便看看的站点。" :
+            site->rankings || site->categories ? "确认后打开当前站点的榜单；可继续按回车浏览集合。" :
+            "确认后显示汽水公开目录里的随机音乐结果。");
+    }
+
+    LRESULT OnSourceChanged(WORD, WORD, HWND, BOOL&) { FillSites(); return 0; }
+    LRESULT OnSiteChanged(WORD, WORD, HWND, BOOL&) { return 0; }
+
+    LRESULT OnOK(WORD, WORD, HWND, BOOL&) {
+        const auto source = SelectedSource();
+        const auto site = SelectedSite();
+        if (!source || !site || !site->searchable || !site->discover) return 0;
+        options.source = source->id;
+        options.site = site->id;
+        options.keyword.clear();
+        options.type = "discover";
+        options.quality = "flac";
+        g_search_site_id = options.site.c_str();
         EndDialog(IDOK);
         return 0;
     }
@@ -768,6 +890,8 @@ public:
         g_download_cleanup = IsDlgButtonChecked(IDC_LX_DOWNLOAD_CLEANUP) == BST_CHECKED;
         g_download_overrides = IsDlgButtonChecked(IDC_LX_DOWNLOAD_OVERRIDES) == BST_CHECKED;
         g_auto_updates = IsDlgButtonChecked(IDC_LX_AUTO_UPDATES) == BST_CHECKED;
+        g_apply_search_naming = IsDlgButtonChecked(IDC_LX_APPLY_SEARCH_NAMING) == BST_CHECKED;
+        refresh_playlist_payload_info();
         changed_ = false;
         callback_->on_state_changed();
         start_update_checks();
@@ -788,6 +912,7 @@ public:
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_OVERRIDES, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_SKIP_FAILURES, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_CLEANUP, BN_CLICKED, OnChanged)
+        COMMAND_HANDLER(IDC_LX_APPLY_SEARCH_NAMING, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_BROWSE, BN_CLICKED, OnBrowse)
         COMMAND_HANDLER(IDC_LX_CHECK_NOW, BN_CLICKED, OnCheck)
     END_MSG_MAP()
@@ -817,6 +942,7 @@ private:
         CheckDlgButton(IDC_LX_DOWNLOAD_OVERRIDES, defaults || g_download_overrides ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(IDC_LX_DOWNLOAD_SKIP_FAILURES, defaults || g_download_skip_failures ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(IDC_LX_DOWNLOAD_CLEANUP, !defaults && g_download_cleanup ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(IDC_LX_APPLY_SEARCH_NAMING, !defaults && g_apply_search_naming ? BST_CHECKED : BST_UNCHECKED);
         loading_ = false;
     }
     LRESULT OnChanged(WORD, WORD, HWND, BOOL&) {
@@ -848,11 +974,21 @@ static preferences_page_factory_t<preferences_page_lxmusic> g_preferences_page;
 
 } // namespace
 
+std::string download_naming_template() { return g_download_naming.get().c_str(); }
+bool apply_naming_to_search() { return g_apply_search_naming; }
 bool automatic_updates_enabled() { return g_auto_updates; }
 void show_component_preferences() { ui_control::get()->show_preferences(guid_preferences); }
 
 bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources) {
     search_dialog dialog;
+    dialog.sources = sources;
+    if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
+    options = dialog.options;
+    return true;
+}
+
+bool show_browse_dialog(SearchOptions& options, const std::vector<SourceOption>& sources) {
+    browse_dialog dialog;
     dialog.sources = sources;
     if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
     options = dialog.options;
