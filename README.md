@@ -4,14 +4,14 @@
 
 ## 下载
 
-- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.12/foo_lxmusic-0.1.12-fb1-x86.fb2k-component)
-- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.12/foo_lxmusic-0.1.12-fb2-x64.fb2k-component)
+- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.13/foo_lxmusic-0.1.13-fb1-x86.fb2k-component)
+- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.13/foo_lxmusic-0.1.13-fb2-x64.fb2k-component)
 
 ## 使用
 
 安装后重启，在“文件 → LX 在线音乐 → 管理音源”导入脚本，搜索时选择音源和站点。回车打开或播放，退格返回上一层，右键下载或复制单首歌曲播放直链。直链有效期由音源决定。
 
-音源管理会显示版本、作者、描述、支持站点与音质。可直接编辑脚本保存 Cookies，也可检查网址音源更新或复制来源地址。
+音源管理会显示版本、作者、描述、支持站点与音质。在音源列表上右键可切换、编辑脚本、检查更新、复制来源地址或删除。
 
 下载支持全部搜索页、1～16 个并发任务、失败跳过及完成后查重。查重只删除本次下载的重复副本，原有文件保留。文件名可用 `{序号}`、`{曲名}`、`{艺术家}`、`{专辑名}`、`{音质}` 组合，同名文件自动加后缀。
 

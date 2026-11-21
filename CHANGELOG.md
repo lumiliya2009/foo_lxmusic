@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.1.12
+## 0.1.13
 
 - Ask for confirmation before replacing a source during an update check, and show the result in a dialog.
+- Move source actions into the source-list context menu for a simpler layout.
 - Download component updates from jsDelivr mirrors first and GitHub as the final fallback.
 
 ## 0.1.11

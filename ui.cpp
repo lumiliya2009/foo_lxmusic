@@ -243,6 +243,7 @@ public:
     BEGIN_MSG_MAP(source_manager_dialog)
         MSG_WM_INITDIALOG(OnInitDialog)
         COMMAND_HANDLER(IDC_LX_SOURCE_LIST, LBN_SELCHANGE, OnSelectionChanged)
+        MESSAGE_HANDLER(WM_CONTEXTMENU, OnContextMenu)
         COMMAND_ID_HANDLER(IDC_LX_IMPORT_FILE, OnAction)
         COMMAND_ID_HANDLER(IDC_LX_IMPORT_URL, OnAction)
         COMMAND_ID_HANDLER(IDC_LX_EDIT_SOURCE, OnAction)
@@ -272,15 +273,45 @@ public:
     void UpdateDetails() {
         const auto source = SelectedSource();
         uSetDlgItemText(*this, IDC_LX_SOURCE_DETAILS, source ? source->details.c_str() : "尚未导入音源。");
-        const BOOL available = source ? TRUE : FALSE;
-        for (const auto id : { IDC_LX_REMOVE_SOURCE, IDC_LX_SELECT_SOURCE, IDC_LX_EDIT_SOURCE,
-            IDC_LX_UPDATE_SOURCE, IDC_LX_COPY_SOURCE_URL }) GetDlgItem(id).EnableWindow(available);
-        if (source) {
-            GetDlgItem(IDC_LX_COPY_SOURCE_URL).EnableWindow(source->url_available ? TRUE : FALSE);
-        }
     }
     LRESULT OnSelectionChanged(WORD, WORD, HWND, BOOL&) { UpdateDetails(); return 0; }
-    LRESULT OnAction(WORD, WORD id, HWND, BOOL&) {
+    LRESULT OnContextMenu(UINT, WPARAM, LPARAM position, BOOL&) {
+        POINT point{ GET_X_LPARAM(position), GET_Y_LPARAM(position) };
+        if (point.x == -1 && point.y == -1) {
+            const auto selected = CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).GetCurSel();
+            RECT item{};
+            if (selected >= 0 && CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).GetItemRect(selected, &item)) {
+                ClientToScreen(&item);
+                point.x = item.left;
+                point.y = item.bottom;
+            }
+        }
+        POINT client = point;
+        ScreenToClient(&client);
+        const auto hit = static_cast<LRESULT>(SendDlgItemMessage(IDC_LX_SOURCE_LIST,
+            LB_ITEMFROMPOINT, 0, MAKELPARAM(client.x, client.y)));
+        if (HIWORD(hit) != 0) return 0;
+        const int index = LOWORD(hit);
+        if (index < 0 || static_cast<size_t>(index) >= sources.size()) return 0;
+        CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).SetCurSel(index);
+        UpdateDetails();
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu) return 0;
+        const auto source = &sources[index];
+        AppendMenuW(menu, MF_STRING | (source->active ? MF_GRAYED : 0), IDC_LX_SELECT_SOURCE, L"设为当前");
+        AppendMenuW(menu, MF_STRING, IDC_LX_EDIT_SOURCE, L"编辑脚本…");
+        AppendMenuW(menu, MF_STRING, IDC_LX_UPDATE_SOURCE, L"检查更新");
+        AppendMenuW(menu, MF_STRING | (source->url_available ? 0 : MF_GRAYED), IDC_LX_COPY_SOURCE_URL, L"复制音源地址");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, IDC_LX_REMOVE_SOURCE, L"删除");
+        const auto command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            point.x, point.y, 0, *this, nullptr);
+        DestroyMenu(menu);
+        if (command) PerformAction(static_cast<WORD>(command));
+        return 0;
+    }
+    LRESULT PerformAction(WORD id) {
         if (id == IDC_LX_IMPORT_FILE) action = SourceAction::import_file;
         else if (id == IDC_LX_IMPORT_URL) action = SourceAction::import_url;
         else if (id == IDC_LX_REMOVE_SOURCE || id == IDC_LX_SELECT_SOURCE || id == IDC_LX_EDIT_SOURCE ||
@@ -293,7 +324,11 @@ public:
                 id == IDC_LX_EDIT_SOURCE ? SourceAction::edit :
                 id == IDC_LX_UPDATE_SOURCE ? SourceAction::update : SourceAction::copy_url;
         }
-        EndDialog(IDOK); return 0;
+        EndDialog(IDOK);
+        return 0;
+    }
+    LRESULT OnAction(WORD, WORD id, HWND, BOOL&) {
+        return PerformAction(id);
     }
 };
 
