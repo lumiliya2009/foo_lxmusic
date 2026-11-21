@@ -5,6 +5,7 @@ namespace lxmusic {
 struct NavigationOrigin {
     playlist_position_reference_tracker position;
     metadb_handle_list selected;
+    std::function<bool()> restore_browser;
 };
 
 namespace {
@@ -163,10 +164,16 @@ std::shared_ptr<NavigationOrigin> capture_navigation_origin(metadb_handle_list_c
     return origin;
 }
 
+std::shared_ptr<NavigationOrigin> capture_browser_navigation(std::function<bool()> restore) {
+    auto origin = std::make_shared<NavigationOrigin>();
+    origin->restore_browser = std::move(restore);
+    return origin;
+}
+
 void reset_playlist_navigation(t_size playlist) {
     g_navigation.erase(std::remove_if(g_navigation.begin(), g_navigation.end(), [playlist](const auto& link) {
         return link->child.m_playlist == playlist || link->child.m_playlist == pfc_infinite ||
-            link->origin->position.m_playlist == pfc_infinite;
+            (!link->origin->restore_browser && link->origin->position.m_playlist == pfc_infinite);
     }), g_navigation.end());
 }
 
@@ -185,8 +192,10 @@ void add_expanded_payloads(const std::vector<std::string>& payloads, const std::
         if (link == g_navigation.end()) break;
         ancestor = (*link)->origin->position.m_playlist;
     }
-    const auto child = add_payloads_to_playlist(payloads, playlist_name, preserve);
-    if (!origin || origin->position.m_playlist == pfc_infinite || child == origin->position.m_playlist) return;
+    const auto child = add_payloads_to_playlist(payloads, playlist_name, preserve,
+        origin && static_cast<bool>(origin->restore_browser));
+    if (!origin || (!origin->restore_browser &&
+        (origin->position.m_playlist == pfc_infinite || child == origin->position.m_playlist))) return;
     auto link = std::make_unique<navigation_link>();
     link->child.m_playlist = child;
     link->origin = origin;
@@ -194,14 +203,22 @@ void add_expanded_payloads(const std::vector<std::string>& payloads, const std::
 }
 
 bool command_back() {
+    if (collection_browser_back()) return true;
     auto playlists = playlist_manager::get();
     const auto active = playlists->get_active_playlist();
     const auto link = std::find_if(g_navigation.begin(), g_navigation.end(), [active](const auto& item) {
         return active != pfc_infinite && item->child.m_playlist == active &&
-            item->origin->position.m_playlist != pfc_infinite;
+            (item->origin->restore_browser || item->origin->position.m_playlist != pfc_infinite);
     });
     if (link == g_navigation.end()) return false;
-    const auto origin = (*link)->origin;
+    return restore_navigation_origin((*link)->origin);
+}
+
+bool restore_navigation_origin(const std::shared_ptr<NavigationOrigin>& origin) {
+    if (!origin) return false;
+    if (origin->restore_browser) return origin->restore_browser();
+    if (origin->position.m_playlist == pfc_infinite) return false;
+    auto playlists = playlist_manager::get();
     const auto parent = origin->position.m_playlist;
     const auto count = playlists->playlist_get_item_count(parent);
     pfc::bit_array_bittable selected(count);

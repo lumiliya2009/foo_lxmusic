@@ -99,7 +99,8 @@ void append_search_controls(std::vector<std::string>& items, const SearchPage& p
     if (page.has_next && page.page < max_page) add(std::to_string(page.page + 1), "下一页 " + std::to_string(page.page + 1));
     if (page.total_pages > page.page && page.total_pages <= max_page)
         add("last", "到尾页 " + std::to_string(page.total_pages));
-    add("jump", "页数跳转  " + search_page_label(page));
+    if (page.total_pages != 1 || page.has_next)
+        add("jump", "页数跳转  " + search_page_label(page));
 }
 
 bool parse_search_page_number(const std::string& text, int maximum, int& page) {

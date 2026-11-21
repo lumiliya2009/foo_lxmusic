@@ -73,6 +73,25 @@ int main() {
         check(!command_back(), "reused search results retained stale history");
         pm->set_active_playlist(nested); pm->remove(parent);
         check(!command_back(), "deleted parent led to an unrelated playlist");
+        unsigned restored = 0;
+        auto browserOrigin = capture_browser_navigation([&] { ++restored; return true; });
+        add_expanded_payloads({"browser-song"}, "browser-album", browserOrigin);
+        const auto browserChild = pm->active;
+        check(command_back() && restored == 1 && pm->active == browserChild,
+            "song list could not return to its independent collection browser");
+        browser_active = true;
+        check(command_back() && browser_back_count == 1 && restored == 1,
+            "browser navigation incorrectly restored the underlying playlist's parent");
+        browser_active = false;
+        add_expanded_payloads({"second-browser-song"}, "browser-album", browserOrigin);
+        check(pm->active != browserChild && *pm->lists[browserChild].items[0] == "browser-song",
+            "opening another collection overwrote an existing song list");
+        // Both browser origins must survive creation of an unrelated playlist.
+        pm->set_active_playlist(browserChild);
+        check(command_back() && restored == 2, "browser origin was purged because it has no parent playlist");
+        reset_playlist_navigation(browserChild);
+        check(!command_back(), "replaced song list retained a stale browser origin");
+        browserOrigin.reset();
         g_navigation.clear(); origin.reset(); nestedOrigin.reset();
         check(playlist_callback_impl_base::listeners.empty(), "navigation trackers were not released");
         std::cout << checks << " navigation regression checks passed\n";

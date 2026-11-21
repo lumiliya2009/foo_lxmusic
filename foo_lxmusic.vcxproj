@@ -35,6 +35,10 @@
     <IntDir>$(ProjectDir)build\obj\$(Platform)\$(Configuration)\</IntDir>
     <TargetName>foo_lxmusic</TargetName>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(LxDisplayTest)'=='true'">
+    <OutDir>$(ProjectDir)build\display-test-$(Platform)\</OutDir>
+    <IntDir>$(ProjectDir)build\obj\display-test-$(Platform)\</IntDir>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalOptions>/utf-8 /permissive %(AdditionalOptions)</AdditionalOptions>
@@ -64,11 +68,16 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="PCH.cpp"><PrecompiledHeader>Create</PrecompiledHeader></ClCompile>
-    <ClCompile Include="main.cpp" />
+    <ClCompile Include="main.cpp" Condition="'$(LxDisplayTest)'!='true'" />
+    <ClCompile Include="tests\DisplayIntegration.cpp" Condition="'$(LxDisplayTest)'=='true'">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="lx_common.cpp" />
     <ClCompile Include="input_lxmusic.cpp" />
     <ClCompile Include="media_stream.cpp" />
     <ClCompile Include="playlist_actions.cpp" />
+    <ClCompile Include="playlist_columns.cpp" />
+    <ClCompile Include="collection_browser.cpp" />
     <ClCompile Include="search_state.cpp" />
     <ClCompile Include="ui.cpp" />
     <ClCompile Include="commands.cpp" />
@@ -77,6 +86,7 @@
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="lx_common.h" />
+    <ClInclude Include="dialog_origin.h" />
   </ItemGroup>
   <ItemGroup><ResourceCompile Include="foo_lxmusic.rc" /></ItemGroup>
   <ItemGroup>

@@ -241,8 +241,12 @@ void fetch_search_page(async_state& state, const SearchOptions& options, int pag
 }
 
 void show_new_search(async_state& state) {
-    const auto index = add_payloads_to_playlist(state.items, search_playlist_name(state.page.options), pfc_infinite, true);
-    mark_search_page(index, state.page);
+    const auto title = search_playlist_name(state.page.options);
+    if (has_collection_results(state.items)) show_collection_browser(state.items, title, &state.page);
+    else {
+        const auto index = add_payloads_to_playlist(state.items, title, pfc_infinite, true);
+        mark_search_page(index, state.page);
+    }
     if (state.page.options.type != "discover") remember_search(state.page.options);
 }
 
@@ -606,6 +610,14 @@ std::string strip_lrc_timestamps(const std::string& raw) {
 
 } // namespace
 
+void fetch_browser_search_page(std::vector<std::string>& items, SearchPage& result,
+    const SearchPage& previous, int requested, bool last, abort_callback& abort) {
+    async_state state;
+    fetch_search_page(state, previous.options, requested, abort, &previous, last);
+    items = std::move(state.items);
+    result = std::move(state.page);
+}
+
 void command_search() {
     run_task("读取音源",
         [](async_state& state, threaded_process_status&, abort_callback& abort) {
@@ -751,6 +763,7 @@ void run_page_action(const std::string& action) {
 } // namespace
 
 void command_page_previous() {
+    if (collection_browser_page_action("previous")) return;
     t_size playlist;
     SearchPage page;
     if (!active_search_page(playlist, page)) {
@@ -765,6 +778,7 @@ void command_page_previous() {
 }
 
 void command_page_next() {
+    if (collection_browser_page_action("next")) return;
     t_size playlist;
     SearchPage page;
     if (!active_search_page(playlist, page)) {
@@ -779,6 +793,7 @@ void command_page_next() {
 }
 
 void command_page_last() {
+    if (collection_browser_page_action("last")) return;
     t_size playlist;
     SearchPage page;
     if (!active_search_page(playlist, page)) {
@@ -792,7 +807,9 @@ void command_page_last() {
     run_page_action("last");
 }
 
-void command_page_jump() { run_page_action("jump"); }
+void command_page_jump() {
+    if (!collection_browser_page_action("jump")) run_page_action("jump");
+}
 
 void command_manage_sources() {
     run_task("管理音源",
@@ -1039,14 +1056,23 @@ void command_expand(metadb_handle_list_cref items) {
             if (state.items.empty()) throw std::runtime_error("所选集合没有返回歌曲");
         },
         [playlist, origin](async_state& state) {
-            add_expanded_payloads(state.items, playlist, origin);
+            if (has_collection_results(state.items)) show_collection_browser(state.items, playlist, nullptr, origin);
+            else add_expanded_payloads(state.items, playlist, origin);
         }, true);
 }
 
-void command_download(metadb_handle_list_cref items) {
+void command_download(metadb_handle_list_cref items, const SearchPage* search_context, const DialogOrigin& origin) {
+    const auto show_error = [origin](const char* title, const char* message) {
+        ::MessageBoxW(origin.owner(), pfc::stringcvt::string_wide_from_utf8(message),
+            pfc::stringcvt::string_wide_from_utf8(title), MB_OK | MB_ICONERROR);
+        origin.restore();
+    };
     SearchPage search;
     DownloadOptions options;
-    options.can_all_pages = download_search_context(items, search);
+    if (search_context) {
+        search = *search_context;
+        options.can_all_pages = search.options.type == "album" || search.options.type == "track";
+    } else options.can_all_pages = download_search_context(items, search);
     std::vector<std::string> payloads;
     for (size_t index = 0; index < items.get_count(); ++index) {
         try {
@@ -1057,16 +1083,18 @@ void command_download(metadb_handle_list_cref items) {
         } catch (...) {}
     }
     if (payloads.empty() && !options.can_all_pages) {
-        popup_message::g_show("请选择 LX 在线歌曲、专辑或榜单搜索结果。", "LX 批量下载");
+        show_error("LX 批量下载", "请选择 LX 在线歌曲、专辑或榜单搜索结果。");
         return;
     }
 
     std::string last_folder, quality, naming_template;
     options.all_pages = payloads.empty();
-    if (!show_download_dialog(payloads, last_folder, quality, naming_template, options)) return;
+    const bool accepted = show_download_dialog(payloads, last_folder, quality, naming_template, options, origin.owner());
+    origin.restore();
+    if (!accepted) return;
     std::string request_file;
     try { if (!options.all_pages) request_file = write_payload_file(payloads); }
-    catch (const std::exception& ex) { popup_message::g_complain("无法创建下载任务", ex); return; }
+    catch (const std::exception& ex) { show_error("无法创建下载任务", ex.what()); return; }
     const auto output = last_folder;
 
     auto state = std::make_shared<async_state>();
@@ -1097,25 +1125,30 @@ void command_download(metadb_handle_list_cref items) {
             }
             delete_utf8_file(request_file);
         },
-        [state, request_file, output](threaded_process_callback::ctx_t, bool was_aborted) {
+        [state, request_file, output, origin](threaded_process_callback::ctx_t, bool was_aborted) {
             delete_utf8_file(request_file);
-            if (was_aborted) return;
-            if (!state->error.empty()) {
-                popup_message::g_complain("LX 批量下载失败", state->error.c_str());
-                return;
-            }
-            auto message = bridge_message(state->result, "DONE");
-            if (message.empty()) message = "下载任务完成。";
-            show_download_complete(message, output);
+            origin.after_task([state, output, was_aborted](HWND owner) {
+                if (was_aborted) return;
+                if (!state->error.empty()) {
+                    ::MessageBoxW(owner, pfc::stringcvt::string_wide_from_utf8(state->error.c_str()),
+                        L"LX 批量下载失败", MB_OK | MB_ICONERROR);
+                    return;
+                }
+                auto message = bridge_message(state->result, "DONE");
+                if (message.empty()) message = "下载任务完成。";
+                show_download_complete(message, output, owner);
+            });
         });
     try {
+        // Keep the long-running task independent of the browser's lifetime.
+        // Its result dialog and focus return use the initiating browser instead.
         threaded_process::g_run_modeless(task,
             threaded_process::flag_show_abort | threaded_process::flag_show_progress_dual |
             threaded_process::flag_show_item | threaded_process::flag_no_focus,
             core_api::get_main_window(), "LX 批量下载");
     } catch (const std::exception& ex) {
         delete_utf8_file(request_file);
-        popup_message::g_complain("无法启动批量下载", ex);
+        show_error("无法启动批量下载", ex.what());
     }
 }
 

@@ -1021,10 +1021,10 @@ bool show_browse_dialog(SearchOptions& options, const std::vector<SourceOption>&
     return true;
 }
 
-bool show_page_dialog(const SearchPage& state, int& page) {
+bool show_page_dialog(const SearchPage& state, int& page, HWND owner) {
     page_dialog dialog;
     dialog.state = state;
-    if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
+    if (dialog.DoModal(owner && ::IsWindow(owner) ? owner : core_api::get_main_window()) != IDOK) return false;
     page = dialog.page;
     return true;
 }
@@ -1071,15 +1071,15 @@ void show_lyrics_dialog(const std::string& caption, const std::string& lyrics) {
     dialog.DoModal(core_api::get_main_window());
 }
 
-void show_download_complete(const std::string& summary, const std::string& folder) {
+void show_download_complete(const std::string& summary, const std::string& folder, HWND owner) {
     download_done_dialog dialog;
     dialog.summary = summary;
     dialog.folder = folder;
-    dialog.DoModal(core_api::get_main_window());
+    dialog.DoModal(owner && ::IsWindow(owner) ? owner : core_api::get_main_window());
 }
 
 bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality,
-    std::string& naming_template, DownloadOptions& options) {
+    std::string& naming_template, DownloadOptions& options, HWND owner) {
     download_dialog dialog;
     dialog.payloads = payloads;
     dialog.folder = folder.empty() ? std::string(g_download_folder.get().c_str()) : folder;
@@ -1089,7 +1089,7 @@ bool show_download_dialog(std::vector<std::string>& payloads, std::string& folde
     dialog.options.skip_failures = g_download_skip_failures;
     dialog.options.cleanup_duplicates = g_download_cleanup;
     dialog.options.workers = std::clamp(static_cast<int>(g_download_workers), 1, 16);
-    if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
+    if (dialog.DoModal(owner && ::IsWindow(owner) ? owner : core_api::get_main_window()) != IDOK) return false;
     folder = dialog.folder;
     quality = dialog.quality;
     naming_template = dialog.naming_template;

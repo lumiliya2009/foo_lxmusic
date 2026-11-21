@@ -147,10 +147,14 @@ struct playlist_manager {
 namespace lxmusic {
 struct NavigationOrigin;
 bool command_back();
+bool restore_navigation_origin(const std::shared_ptr<NavigationOrigin>& origin);
+static bool browser_active = false;
+static unsigned browser_back_count = 0;
+bool collection_browser_back() { if (!browser_active) return false; ++browser_back_count; return true; }
 void reset_playlist_navigation(t_size);
-t_size add_payloads_to_playlist(const std::vector<std::string>& values, const std::string& name, t_size preserve) {
+t_size add_payloads_to_playlist(const std::vector<std::string>& values, const std::string& name, t_size preserve, bool create_new = false) {
     auto* pm = playlist_manager::get(); auto index = pm->find_playlist(name.c_str());
-    if (index == pfc_infinite || index == preserve) index = pm->create(name, values);
+    if (create_new || index == pfc_infinite || index == preserve) index = pm->create(name, values);
     else pm->fill(index, values);
     reset_playlist_navigation(index); pm->set_active_playlist(index); return index;
 }

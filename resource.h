@@ -11,6 +11,9 @@
 #define IDD_LX_DOWNLOAD_DONE      109
 #define IDD_LX_BROWSE             110
 #define IDD_LX_UPDATE             111
+#define IDD_LX_COLLECTIONS        112
+#define IDC_LX_COLLECTION_LIST    1112
+#define IDC_LX_COLLECTION_BACK    1113
 #define IDC_LX_SOURCE             1101
 #define IDC_LX_SOURCE_LIST        1102
 #define IDC_LX_IMPORT_FILE        1103

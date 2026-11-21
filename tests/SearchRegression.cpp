@@ -73,6 +73,13 @@ int main() {
         page.page = 2; page.has_next = true; page.total_pages = page.total_items = -1;
         items.clear(); append_search_controls(items, page);
         check(items.size() == 3 && decode_payload(items.back()).get(pf_title).find("总页数未知") != std::string::npos, "unknown total invented a last page");
+        page.page = 1; page.total_pages = 1; page.total_items = 1; page.has_next = false;
+        items = {"song-placeholder"}; append_search_controls(items, page);
+        check(items == std::vector<std::string>{"song-placeholder"}, "single-page results retained a redundant page-jump row");
+        page.total_pages = page.total_items = -1; page.has_next = true;
+        items.clear(); append_search_controls(items, page);
+        check(items.size() == 2 && decode_payload(items[0]).get(pf_id) == "2" &&
+            decode_payload(items[1]).get(pf_id) == "jump", "unknown page count lost next/jump controls");
         int number = 9;
         check(parse_search_page_number("3", 3, number) && number == 3, "valid jump rejected");
         for (const auto& value : {"", "0", "-1", "4", "1x", "1.5", "2147483647"})
@@ -122,6 +129,32 @@ int main() {
         check(is_ranking_payload(collection), "ranking payload was not recognized");
         collection.fields[pf_collection_kind] = "Playlist";
         check(!is_ranking_payload(collection), "ordinary playlist was mistaken for a ranking");
+        collection.fields[pf_version] = "1";
+        collection.fields[pf_collection_kind] = "Ranking";
+        collection.fields[pf_title] = "飙升榜";
+        collection.fields[pf_artist] = "10,000 次收听";
+        collection.fields[pf_album] = "QQ音乐";
+        check(collection_result_label(collection) == "飙升榜", "browser ranking label included artist, platform or duration");
+        collection.fields[pf_title] = "榜单 ? - 00";
+        check(collection_result_label(collection) == "榜单 ? - 00", "browser removed legitimate title punctuation");
+        auto ranking = encode_payload(collection.fields);
+        check(has_collection_results({ranking}), "ranking did not open in the collection browser");
+        display.fields[pf_version] = "1";
+        auto song = encode_payload(display.fields);
+        check(!has_collection_results({song}), "track-only results did not stay in the native playlist");
+        next.fields[pf_version] = "1";
+        auto navigation = encode_payload(next.fields);
+        check(!has_collection_results({song, navigation}), "song search pagination forced a collection browser");
+        check(has_collection_results({ranking, navigation}), "collection pagination forced a native playlist");
+        for (const auto kind : {"album", "artist", "playlist"}) {
+            collection.fields[pf_kind] = kind;
+            collection.fields[pf_collection_kind] = kind;
+            check(has_collection_results({encode_payload(collection.fields)}), "collection search opened in native playlist");
+        }
+        collection.fields[pf_kind] = "album";
+        collection.fields[pf_title] = "测试专辑";
+        collection.fields[pf_artist] = "测试歌手";
+        check(collection_result_label(collection) == "测试专辑 — 测试歌手", "album artist was not displayed");
         std::cout << checks << " search state/history regression checks passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

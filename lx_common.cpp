@@ -73,6 +73,13 @@ bool is_ranking_payload(const Payload& payload) {
     return payload.is_collection() && payload.get(pf_collection_kind) == "Ranking";
 }
 
+std::string collection_result_label(const Payload& payload) {
+    auto label = payload.get(pf_title);
+    if (payload.get(pf_kind) == "album" && !payload.get(pf_artist).empty())
+        label += " — " + payload.get(pf_artist);
+    return label;
+}
+
 std::string base64url_encode(const void* data, size_t bytes) {
     static constexpr char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     const auto* input = static_cast<const unsigned char*>(data);
@@ -154,6 +161,12 @@ Payload decode_payload(const std::string& encoded) {
     return payload;
 }
 
+bool has_collection_results(const std::vector<std::string>& items) {
+    return std::any_of(items.begin(), items.end(), [](const std::string& encoded) {
+        return decode_payload(encoded).is_collection();
+    });
+}
+
 std::string payload_to_uri(const std::string& encoded) {
     return std::string(kSchemePrefix) + encoded + kSchemeSuffix;
 }
@@ -233,6 +246,17 @@ void payload_to_info(const Payload& payload, file_info& info, size_t number, siz
     info.meta_set("TITLE", title.c_str());
     const bool navigation = payload.is_navigation();
     const bool ranking = is_ranking_payload(payload);
+    // Empty tags still evaluate as present in title formatting (for example,
+    // an empty TRACKNUMBER becomes 00). Mark name-only rows explicitly so
+    // playlist columns can suppress the entire expression, separators included.
+    if (navigation || ranking) info.meta_set("LX_TITLE_ONLY", "1");
+    else info.meta_remove_field("LX_TITLE_ONLY");
+    if (navigation || ranking) {
+        for (const auto field : { "ARTIST", "ALBUM", "ALBUM ARTIST", "TRACKNUMBER" })
+            info.meta_remove_field(field);
+        info.info_remove("length");
+        info.set_length(0);
+    }
     if (!navigation && !ranking) {
         if (!payload.get(pf_artist).empty()) info.meta_set("ARTIST", payload.get(pf_artist).c_str());
         if (!payload.get(pf_album).empty()) info.meta_set("ALBUM", payload.get(pf_album).c_str());
@@ -245,16 +269,7 @@ void payload_to_info(const Payload& payload, file_info& info, size_t number, siz
         info.set_length(0);
         info.info_set("encoding", "LX search navigation - Enter to open");
     } else if (payload.is_collection()) {
-        if (ranking) {
-            // Some foobar2000 themes render unknown fields as "?". Present empty
-            // values instead so conditional title formats omit every field except
-            // the catalog title and no synthetic 0:00 duration is shown.
-            info.meta_set("ARTIST", "");
-            info.meta_set("ALBUM", "");
-            info.meta_set("ALBUM ARTIST", "");
-            info.meta_set("TRACKNUMBER", "");
-            info.info_set("length", "");
-        } else info.meta_set("ALBUM", payload.get(pf_platform_label).c_str());
+        if (!ranking) info.meta_set("ALBUM", payload.get(pf_platform_label).c_str());
         info.info_set("encoding", "LX collection result - Enter to open");
     } else {
         info.info_set("encoding", "LX online source");

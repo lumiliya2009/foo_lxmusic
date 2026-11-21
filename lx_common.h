@@ -1,10 +1,12 @@
 #pragma once
 
+#include "dialog_origin.h"
+
 namespace lxmusic {
 
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 constexpr const char* kSchemeSuffix = ".lxmusic";
-constexpr const char* kVersion = "0.1.14";
+constexpr const char* kVersion = "0.1.16";
 
 enum PayloadField : size_t {
     pf_version = 0,
@@ -34,6 +36,8 @@ struct Payload {
     bool is_navigation() const;
 };
 bool is_ranking_payload(const Payload& payload);
+bool has_collection_results(const std::vector<std::string>& items);
+std::string collection_result_label(const Payload& payload);
 
 struct BridgeLine {
     std::vector<std::string> fields;
@@ -119,6 +123,8 @@ t_size add_payloads_to_playlist(const std::vector<std::string>& payloads, const 
 void replace_playlist_payloads(const std::vector<std::string>& payloads, t_size playlist, bool activate = true);
 struct NavigationOrigin;
 std::shared_ptr<NavigationOrigin> capture_navigation_origin(metadb_handle_list_cref items);
+std::shared_ptr<NavigationOrigin> capture_browser_navigation(std::function<bool()> restore);
+bool restore_navigation_origin(const std::shared_ptr<NavigationOrigin>& origin);
 void add_expanded_payloads(const std::vector<std::string>& payloads, const std::string& playlist_name,
     const std::shared_ptr<NavigationOrigin>& origin);
 void reset_playlist_navigation(t_size playlist);
@@ -130,16 +136,22 @@ std::string lyric_payload_for_handle(metadb_handle_ptr handle);
 
 bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources);
 bool show_browse_dialog(SearchOptions& options, const std::vector<SourceOption>& sources);
-bool show_page_dialog(const SearchPage& state, int& page);
+bool show_page_dialog(const SearchPage& state, int& page, HWND owner = nullptr);
+void show_collection_browser(const std::vector<std::string>& items, const std::string& title,
+    const SearchPage* page = nullptr, const std::shared_ptr<NavigationOrigin>& origin = {});
+bool collection_browser_back();
+bool collection_browser_page_action(const std::string& action);
+void fetch_browser_search_page(std::vector<std::string>& items, SearchPage& result,
+    const SearchPage& previous, int requested, bool last, abort_callback& abort);
 SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected);
 bool show_source_editor(const std::string& title, std::string& script, std::string& revision);
 bool show_url_dialog(std::string& url);
 bool show_update_dialog(const std::string& version, const std::string& changelog);
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics);
-void show_download_complete(const std::string& summary, const std::string& folder);
+void show_download_complete(const std::string& summary, const std::string& folder, HWND owner = nullptr);
 struct DownloadOptions { bool can_all_pages = false, all_pages = false, skip_failures = true, cleanup_duplicates = false; int workers = 3; };
 bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality,
-    std::string& naming_template, DownloadOptions& options);
+    std::string& naming_template, DownloadOptions& options, HWND owner = nullptr);
 
 void command_search();
 void command_browse();
@@ -160,7 +172,8 @@ void start_update_checks();
 void stop_update_checks();
 void command_lyrics(metadb_handle_list_cref items);
 void command_expand(metadb_handle_list_cref items);
-void command_download(metadb_handle_list_cref items);
+void command_download(metadb_handle_list_cref items, const SearchPage* search_context = nullptr,
+    const DialogOrigin& origin = {});
 void command_switch_quality(metadb_handle_list_cref items, const std::string& quality);
 
 } // namespace lxmusic

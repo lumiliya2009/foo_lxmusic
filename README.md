@@ -4,8 +4,8 @@
 
 ## 下载
 
-- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.14/foo_lxmusic-0.1.14-fb1-x86.fb2k-component)
-- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.14/foo_lxmusic-0.1.14-fb2-x64.fb2k-component)
+- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.16/foo_lxmusic-0.1.16-fb1-x86.fb2k-component)
+- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.16/foo_lxmusic-0.1.16-fb2-x64.fb2k-component)
 
 ## 使用
 
@@ -19,9 +19,11 @@
 
 列表末尾可翻页、到尾页或输入页码跳转。搜索框保存最近 20 条记录，直接输入覆盖旧文字；多次搜索保留独立结果列表。
 
+专辑、歌手、歌单和榜单在组件自己的浏览列表中显示，榜单只显示名称；打开后自动切回 foobar2000 歌曲列表，退格返回原来的浏览位置。直接搜索歌曲仍使用播放器列表。旧的榜单播放列表和歌曲搜索中的翻页项可选使用 [LX 显示列](PLAYLIST_DISPLAY.md)。
+
 改返回键：在“首选项 → 快捷键”新增绑定，动作选“文件 → LX 在线音乐 → 返回上一层”。自定义后默认退格停用。
 
-默认每天自动检查组件更新，失败后稍后重试；可在设置中关闭。菜单“检查更新”也可手动检查，确认后优先从 jsDelivr 多节点镜像下载对应位数的安装包，GitHub 作为最后备用；安装包会校验大小和 SHA256，替换失败恢复原文件。
+默认启动后自动检查组件更新，随后每小时检查，失败后稍后重试；可在设置中关闭。菜单“检查更新”也可手动检查，确认后优先从国内通道下载对应位数的安装包，并提供 GitHub 等备用通道；安装包会校验大小和 SHA256，替换失败恢复原文件。
 
 需要 .NET Framework 4.8，音源需自行导入。
 
