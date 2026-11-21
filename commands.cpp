@@ -735,7 +735,10 @@ void command_check_update(bool automatic) {
             }
             if (!automatic) {
                 const auto message = bridge_message(state.result);
-                show_status(message.empty() ? "当前已是最新版本" : message);
+                const auto latest = message.empty() ? std::string("当前已是最新版本") : message;
+                MessageBoxW(core_api::get_main_window(),
+                    pfc::stringcvt::string_wide_from_utf8(latest.c_str()),
+                    L"LX 组件更新", MB_OK | MB_ICONINFORMATION);
             }
         }, false, automatic);
 }
