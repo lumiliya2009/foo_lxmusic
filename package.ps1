@@ -20,7 +20,7 @@ $bridgePackageFiles = @(
     'System.Numerics.Vectors.dll',
     'System.Runtime.CompilerServices.Unsafe.dll'
 )
-$version = '0.1.12'
+$version = '0.1.13'
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path -LiteralPath $vswhere)) { throw '找不到 Visual Studio Installer (vswhere.exe)' }
