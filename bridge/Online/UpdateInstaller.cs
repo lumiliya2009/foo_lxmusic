@@ -44,9 +44,13 @@ namespace LxMusic.Bridge.Online
             UpdateChecker.ValidatePackage(update);
             foreach (var url in UpdateChecker.PackageUrls(update))
             {
-                var mirror = new Uri(url).Host.EndsWith(".jsdelivr.net", StringComparison.OrdinalIgnoreCase) ||
-                    new Uri(url).Host.Equals("jsdelivr.net", StringComparison.OrdinalIgnoreCase);
-                foreach (var direct in mirror ? new[] { true, false } : new[] { false, true })
+                var host = new Uri(url).Host;
+                var directFirst = host.EndsWith(".jsdelivr.net", StringComparison.OrdinalIgnoreCase) ||
+                    host.Equals("jsdelivr.net", StringComparison.OrdinalIgnoreCase) ||
+                    host.Equals("gh-proxy.org", StringComparison.OrdinalIgnoreCase) ||
+                    host.Equals("ghfast.top", StringComparison.OrdinalIgnoreCase) ||
+                    host.Equals("gh-proxy.com", StringComparison.OrdinalIgnoreCase);
+                foreach (var direct in directFirst ? new[] { true, false } : new[] { false, true })
                 {
                     try
                     {
@@ -54,7 +58,7 @@ namespace LxMusic.Bridge.Online
                         if (fetch != null) bytes = fetch(url, direct);
                         else
                         {
-                            var response = OnlineHttp.Execute(url, timeoutMs: 20000,
+                            var response = OnlineHttp.Execute(url, timeoutMs: 25000,
                                 maxBytes: UpdateChecker.MaxPackageBytes, useSystemProxy: true, forceDirect: direct);
                             if (!response.Ok) continue;
                             bytes = response.BodyBytes;

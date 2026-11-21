@@ -116,12 +116,16 @@ namespace LxMusic.Bridge.Online
         {
             if (update == null) throw new InvalidOperationException("更新安装包地址无效");
             var repositoryPath = "lumiliya2009/foo_lxmusic@" + update.Version + "/downloads/" + update.PackageName;
+            var releaseUrl = Downloads + update.Version + "/" + update.PackageName;
             return new[]
             {
+                "https://gh-proxy.org/" + releaseUrl,
+                "https://ghfast.top/" + releaseUrl,
+                "https://gh-proxy.com/" + releaseUrl,
                 "https://gcore.jsdelivr.net/gh/" + repositoryPath,
                 "https://fastly.jsdelivr.net/gh/" + repositoryPath,
                 "https://cdn.jsdelivr.net/gh/" + repositoryPath,
-                Downloads + update.Version + "/" + update.PackageName
+                releaseUrl
             };
         }
 
