@@ -40,6 +40,7 @@ if (-not $SkipBuild) {
 
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression
 
 function New-ComponentPackage {
     param(
@@ -70,7 +71,23 @@ function New-ComponentPackage {
 
     $packagePath = Join-Path $distDir "foo_lxmusic-$version-$HostLabel-$Architecture.fb2k-component"
     if (Test-Path -LiteralPath $packagePath) { Remove-Item -LiteralPath $packagePath -Force }
-    [IO.Compression.ZipFile]::CreateFromDirectory($stageDir, $packagePath, [IO.Compression.CompressionLevel]::Optimal, $false)
+    $archive = [System.IO.Compression.ZipFile]::Open($packagePath, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $stageRoot = [IO.Path]::GetFullPath($stageDir).TrimEnd('\') + '\'
+        foreach ($file in Get-ChildItem -LiteralPath $stageDir -File -Recurse | Sort-Object FullName) {
+            $relative = [IO.Path]::GetFullPath($file.FullName).Substring($stageRoot.Length).Replace('\', '/')
+            if ($relative.Contains('\')) { throw "安装包路径未标准化：$relative" }
+            $entry = $archive.CreateEntry($relative, [IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = $file.LastWriteTime
+            $input = [IO.File]::OpenRead($file.FullName)
+            try {
+                $output = $entry.Open()
+                try { $input.CopyTo($output) } finally { $output.Dispose() }
+            }
+            finally { $input.Dispose() }
+        }
+    }
+    finally { $archive.Dispose() }
     Remove-Item -LiteralPath $stageDir -Recurse -Force
     Get-Item -LiteralPath $packagePath
 }
