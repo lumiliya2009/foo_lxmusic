@@ -31,19 +31,23 @@ namespace LxMusic.Bridge.Online
         }
 
         public static string Prepare(ComponentUpdate update, string updatesDirectory,
-            string componentDirectory, string host, int parentId)
+            string componentDirectory, string host, int parentId,
+            Action<string> status = null, Action<long, long> progress = null)
         {
             UpdateChecker.ValidatePackage(update);
             ValidateTarget(componentDirectory);
-            var bytes = DownloadPackage(update);
+            var bytes = DownloadPackage(update, null, status, progress);
             return PrepareDownloaded(update, bytes, updatesDirectory, componentDirectory, host, parentId);
         }
 
-        public static byte[] DownloadPackage(ComponentUpdate update, Func<string, bool, byte[]> fetch = null)
+        public static byte[] DownloadPackage(ComponentUpdate update, Func<string, bool, byte[]> fetch = null,
+            Action<string> status = null, Action<long, long> progress = null)
         {
             UpdateChecker.ValidatePackage(update);
-            foreach (var url in UpdateChecker.PackageUrls(update))
+            var urls = UpdateChecker.PackageUrls(update);
+            for (var index = 0; index < urls.Length; index++)
             {
+                var url = urls[index];
                 var host = new Uri(url).Host;
                 var directFirst = host.EndsWith(".jsdelivr.net", StringComparison.OrdinalIgnoreCase) ||
                     host.Equals("jsdelivr.net", StringComparison.OrdinalIgnoreCase) ||
@@ -54,17 +58,24 @@ namespace LxMusic.Bridge.Online
                 {
                     try
                     {
+                        status?.Invoke(index == 0 ? "正在连接国内更新节点…" : "正在尝试备用更新节点…");
                         byte[] bytes;
                         if (fetch != null) bytes = fetch(url, direct);
                         else
                         {
                             var response = OnlineHttp.Execute(url, timeoutMs: 25000,
-                                maxBytes: UpdateChecker.MaxPackageBytes, useSystemProxy: true, forceDirect: direct);
+                                maxBytes: UpdateChecker.MaxPackageBytes, useSystemProxy: true, forceDirect: direct,
+                                progress: progress);
                             if (!response.Ok) continue;
                             bytes = response.BodyBytes;
                         }
+                        status?.Invoke("正在校验更新安装包…");
                         if (bytes != null && bytes.LongLength == update.Size && string.Equals(
-                            "sha256:" + Hash(bytes), update.Sha256, StringComparison.OrdinalIgnoreCase)) return bytes;
+                            "sha256:" + Hash(bytes), update.Sha256, StringComparison.OrdinalIgnoreCase))
+                        {
+                            progress?.Invoke(bytes.LongLength, bytes.LongLength);
+                            return bytes;
+                        }
                     }
                     catch { }
                 }

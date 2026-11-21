@@ -10,6 +10,7 @@
 #define IDD_LX_SOURCE_EDITOR      108
 #define IDD_LX_DOWNLOAD_DONE      109
 #define IDD_LX_BROWSE             110
+#define IDD_LX_UPDATE             111
 #define IDC_LX_SOURCE             1101
 #define IDC_LX_SOURCE_LIST        1102
 #define IDC_LX_IMPORT_FILE        1103
@@ -57,6 +58,8 @@
 #define IDC_LX_DOWNLOAD_DONE_TEXT 1033
 #define IDC_LX_OPEN_DOWNLOAD_DIR  1034
 #define IDC_LX_APPLY_SEARCH_NAMING 1035
+#define IDC_LX_UPDATE_VERSION     1036
+#define IDC_LX_UPDATE_NOTES       1037
 
 #ifndef IDC_STATIC
 #define IDC_STATIC -1

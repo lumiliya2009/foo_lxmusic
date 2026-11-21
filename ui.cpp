@@ -554,6 +554,27 @@ public:
     LRESULT OnClose(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
 };
 
+class update_dialog : public CDialogImpl<update_dialog> {
+public:
+    enum { IDD = IDD_LX_UPDATE };
+    std::string version, changelog;
+    BEGIN_MSG_MAP(update_dialog)
+        MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_ID_HANDLER(IDOK, OnOK)
+        COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
+    END_MSG_MAP()
+    BOOL OnInitDialog(CWindow, LPARAM) {
+        CenterWindow(GetParent());
+        uSetDlgItemText(*this, IDC_LX_UPDATE_VERSION, version.c_str());
+        uSetDlgItemText(*this, IDC_LX_UPDATE_NOTES,
+            changelog.empty() ? "本次更新没有提供详细说明。" : changelog.c_str());
+        GetDlgItem(IDOK).SetFocus();
+        return FALSE;
+    }
+    LRESULT OnOK(WORD, WORD, HWND, BOOL&) { EndDialog(IDOK); return 0; }
+    LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
+};
+
 class url_dialog : public CDialogImpl<url_dialog> {
 public:
     enum { IDD = IDD_LX_URL };
@@ -1036,6 +1057,13 @@ bool show_url_dialog(std::string& url) {
     if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
     url = dialog.value;
     return true;
+}
+
+bool show_update_dialog(const std::string& version, const std::string& changelog) {
+    update_dialog dialog;
+    dialog.version = version;
+    dialog.changelog = changelog;
+    return dialog.DoModal(core_api::get_main_window()) == IDOK;
 }
 
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics) {

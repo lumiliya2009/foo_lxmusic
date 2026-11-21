@@ -4,7 +4,7 @@ namespace lxmusic {
 
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 constexpr const char* kSchemeSuffix = ".lxmusic";
-constexpr const char* kVersion = "0.1.13";
+constexpr const char* kVersion = "0.1.14";
 
 enum PayloadField : size_t {
     pf_version = 0,
@@ -33,6 +33,7 @@ struct Payload {
     bool is_collection() const;
     bool is_navigation() const;
 };
+bool is_ranking_payload(const Payload& payload);
 
 struct BridgeLine {
     std::vector<std::string> fields;
@@ -133,6 +134,7 @@ bool show_page_dialog(const SearchPage& state, int& page);
 SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected);
 bool show_source_editor(const std::string& title, std::string& script, std::string& revision);
 bool show_url_dialog(std::string& url);
+bool show_update_dialog(const std::string& version, const std::string& changelog);
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics);
 void show_download_complete(const std::string& summary, const std::string& folder);
 struct DownloadOptions { bool can_all_pages = false, all_pages = false, skip_failures = true, cleanup_duplicates = false; int workers = 3; };

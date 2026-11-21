@@ -10,7 +10,7 @@ namespace LxMusic.Bridge.Online
     /// <summary>在线音乐主仓库：搜索 / 解析播放地址 / 歌单 / 音源导入。</summary>
     public sealed class OnlineMusicRepository
     {
-        public const string DefaultSourceCatalogUrl = "https://dl.voxly.cn/live/online-sources.json";
+        public const string DefaultSourceCatalogUrl = "";
 
         private readonly object _runtimeSync = new object();
         private LxSourceRuntime _runtime;
@@ -1149,6 +1149,7 @@ namespace LxMusic.Bridge.Online
         public List<KeyValuePair<string, string>> LoadBuiltInSources(string catalogUrl = null)
         {
             var url = string.IsNullOrWhiteSpace(catalogUrl) ? DefaultSourceCatalogUrl : catalogUrl.Trim();
+            if (string.IsNullOrWhiteSpace(url)) throw new InvalidOperationException("未配置内置音源目录");
             var response = OnlineHttp.Execute(url, timeoutMs: 8000, maxBytes: 128 * 1024);
             if (!response.Ok) throw new InvalidOperationException(HttpError(response.StatusCode));
             var urls = ParseBuiltInSourceCatalog(response.Body);

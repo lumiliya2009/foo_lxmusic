@@ -143,7 +143,11 @@ namespace LxMusic.Bridge.Online
         {
             if (args.Length != 6 || !int.TryParse(args[5], out var parent)) throw new InvalidOperationException("更新参数无效");
             var update = JsonConvert.DeserializeObject<ComponentUpdate>(ArgText(args, 2));
-            var stage = UpdateInstaller.Prepare(update, AppPaths.File("updates"), ArgText(args, 3), ArgText(args, 4), parent);
+            var stage = UpdateInstaller.Prepare(update, AppPaths.File("updates"), ArgText(args, 3), ArgText(args, 4), parent,
+                text => Emit("STATUS", PayloadCodec.EncodeText(text)),
+                (received, total) => Emit("PROGRESS",
+                    received.ToString(CultureInfo.InvariantCulture),
+                    total.ToString(CultureInfo.InvariantCulture)));
             Emit("READY", PayloadCodec.EncodeText(stage));
         }
 

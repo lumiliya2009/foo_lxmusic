@@ -9,6 +9,8 @@ $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $distDir = Join-Path $projectRoot 'dist'
 $bridgeProject = Join-Path $projectRoot 'bridge\foo_lx_bridge.csproj'
 $bridgeOutput = Join-Path $projectRoot 'bridge\bin\Release\net48'
+$privateEndpointSource = Join-Path $projectRoot 'bridge\PrivateUpdateEndpoint.g.cs'
+$privateEndpointFile = Join-Path $projectRoot 'build\private-update-endpoint.txt'
 $bridgePackageFiles = @(
     'foo_lx_bridge.exe',
     'foo_lx_bridge.exe.config',
@@ -20,7 +22,7 @@ $bridgePackageFiles = @(
     'System.Numerics.Vectors.dll',
     'System.Runtime.CompilerServices.Unsafe.dll'
 )
-$version = '0.1.13'
+$version = '0.1.14'
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path -LiteralPath $vswhere)) { throw '找不到 Visual Studio Installer (vswhere.exe)' }
@@ -29,8 +31,48 @@ if ([string]::IsNullOrWhiteSpace($vsRoot)) { throw '找不到带 C++ 工具链�
 $msbuild = Join-Path $vsRoot 'MSBuild\Current\Bin\MSBuild.exe'
 
 if (-not $SkipBuild) {
-    & dotnet build $bridgeProject -c Release -p:RestoreLockedMode=true
-    if ($LASTEXITCODE -ne 0) { throw 'LX bridge 编译失败' }
+    $privateEndpoint = $env:LX_UPDATE_ENDPOINT
+    if ([string]::IsNullOrWhiteSpace($privateEndpoint) -and (Test-Path -LiteralPath $privateEndpointFile)) {
+        $privateEndpoint = (Get-Content -LiteralPath $privateEndpointFile -Raw).Trim()
+    }
+    $privateEndpoint = ([string]$privateEndpoint).Trim().TrimEnd('/') + $(if ([string]::IsNullOrWhiteSpace($privateEndpoint)) { '' } else { '/' })
+    if (-not [string]::IsNullOrWhiteSpace($privateEndpoint)) {
+        $uri = $null
+        if (-not [Uri]::TryCreate($privateEndpoint, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https') {
+            throw 'LX_UPDATE_ENDPOINT 必须是 HTTPS 地址'
+        }
+    }
+    $privateBytes = [Text.Encoding]::UTF8.GetBytes($privateEndpoint)
+    for ($i = 0; $i -lt $privateBytes.Length; $i++) { $privateBytes[$i] = $privateBytes[$i] -bxor 0xA7 }
+    $privateLiteral = ($privateBytes -join ',')
+    $privateDirectory = Split-Path -Parent $privateEndpointSource
+    New-Item -ItemType Directory -Path $privateDirectory -Force | Out-Null
+    $generated = @"
+using System.Text;
+namespace LxMusic.Bridge.Online
+{
+    internal static class PrivateUpdateEndpoint
+    {
+        internal static string Value
+        {
+            get
+            {
+                var bytes = new byte[] { $privateLiteral };
+                for (var i = 0; i < bytes.Length; i++) bytes[i] ^= 0xA7;
+                return Encoding.UTF8.GetString(bytes);
+            }
+        }
+    }
+}
+"@
+    [IO.File]::WriteAllText($privateEndpointSource, $generated, (New-Object Text.UTF8Encoding($false)))
+    try {
+        & dotnet build $bridgeProject -c Release -p:RestoreLockedMode=true
+        if ($LASTEXITCODE -ne 0) { throw 'LX bridge 编译失败' }
+    }
+    finally {
+        if (Test-Path -LiteralPath $privateEndpointSource) { Remove-Item -LiteralPath $privateEndpointSource -Force }
+    }
 
     & $msbuild (Join-Path $projectRoot 'foo_lxmusic.vcxproj') /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:PlatformToolset=$PlatformToolset" /v:minimal
     if ($LASTEXITCODE -ne 0) { throw 'Win32 插件编译失败' }

@@ -117,6 +117,11 @@ int main() {
         collection.fields[pf_title] = "专辑搜索结果";
         check(format_track_display_title(collection, "{序号} - {曲名}", 3, 30) == "专辑搜索结果",
             "collection result was formatted as a track filename");
+        collection.fields[pf_kind] = "playlist";
+        collection.fields[pf_collection_kind] = "Ranking";
+        check(is_ranking_payload(collection), "ranking payload was not recognized");
+        collection.fields[pf_collection_kind] = "Playlist";
+        check(!is_ranking_payload(collection), "ordinary playlist was mistaken for a ranking");
         std::cout << checks << " search state/history regression checks passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

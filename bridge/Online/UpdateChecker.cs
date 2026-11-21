@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -25,29 +26,46 @@ namespace LxMusic.Bridge.Online
         private const string Releases = "https://github.com/lumiliya2009/foo_lxmusic/releases/tag/";
         private const string Downloads = "https://github.com/lumiliya2009/foo_lxmusic/releases/download/";
         public const int MaxPackageBytes = 32 * 1024 * 1024;
-        private static readonly string[] Feeds = {
-            "https://api.github.com/repos/lumiliya2009/foo_lxmusic/releases/latest",
-            "https://raw.githubusercontent.com/lumiliya2009/foo_lxmusic/main/update.json",
-            "https://cdn.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json",
-            // Optional provider endpoints, used only as additional fallbacks.
-            // Their availability is not guaranteed by jsDelivr.
-            "https://fastly.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json",
-            "https://gcore.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json"
-        };
-
         public static ComponentUpdate Check(string current, string architecture = null,
             Func<string, bool, string> fetch = null)
         {
             if (ParseVersion(current) == null) throw new InvalidOperationException("当前版本号无法识别");
             if (architecture != null) PackageName("v0.0.0", architecture);
-            var handles = Enumerable.Range(0, Feeds.Length * 2).Select(_ => new OnlineHttpRequestHandle()).ToArray();
+            var privateFeed = PrivateFeedUrl();
+            if (privateFeed.Length > 0)
+            {
+                var privateResult = CheckFeeds(new[] { privateFeed }, current, architecture, fetch);
+                if (privateResult.AnySucceeded) return privateResult.Update;
+            }
+            var fallback = CheckFeeds(FallbackFeedUrls(), current, architecture, fetch);
+            if (!fallback.AnySucceeded)
+                throw new IOException("检查更新失败：所有更新通道均不可用，请检查网络后重试");
+            return fallback.Update;
+        }
+
+        private sealed class FeedResult
+        {
+            internal bool Succeeded;
+            internal ComponentUpdate Update;
+        }
+
+        private sealed class CheckResult
+        {
+            internal bool AnySucceeded;
+            internal ComponentUpdate Update;
+        }
+
+        private static CheckResult CheckFeeds(string[] feeds, string current, string architecture,
+            Func<string, bool, string> fetch)
+        {
+            var handles = Enumerable.Range(0, feeds.Length * 2).Select(_ => new OnlineHttpRequestHandle()).ToArray();
             // Try the user's proxy and direct route independently. A dead local
             // proxy or a blocked API must not prevent the other feeds working.
             var tasks = handles.Select((handle, index) => Task.Factory.StartNew(() =>
             {
                 try
                 {
-                    var url = Feeds[index / 2]; var direct = index % 2 == 1;
+                    var url = feeds[index / 2]; var direct = index % 2 == 1;
                     string json;
                     if (fetch != null) json = fetch(url, direct);
                     else
@@ -57,24 +75,26 @@ namespace LxMusic.Bridge.Online
                         if (!response.Ok) return null;
                         json = response.Body;
                     }
-                    return new FeedResult { Update = Parse(json, current, architecture) };
+                    return new FeedResult { Succeeded = true, Update = Parse(json, current, architecture) };
                 }
-                catch { return null; }
+                catch { return new FeedResult(); }
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
             try
             {
                 Task.WaitAll(tasks, 18000);
                 var valid = tasks.Where(task => task.Status == TaskStatus.RanToCompletion)
-                    .Select(task => task.Result).Where(result => result != null).ToArray();
-                if (valid.Length == 0) throw new IOException("检查更新失败：所有更新通道均不可用，请检查网络后重试");
+                    .Select(task => task.Result).Where(result => result != null && result.Succeeded).ToArray();
+                if (valid.Length == 0) return new CheckResult();
                 // CDN caches can lag behind GitHub. Compare every valid result.
-                return valid.Where(result => result.Update != null).Select(result => result.Update)
-                    .OrderByDescending(update => ParseVersion(update.Version)).FirstOrDefault();
+                return new CheckResult
+                {
+                    AnySucceeded = true,
+                    Update = valid.Where(result => result.Update != null).Select(result => result.Update)
+                        .OrderByDescending(update => ParseVersion(update.Version)).FirstOrDefault()
+                };
             }
             finally { foreach (var handle in handles) handle.Cancel(); }
         }
-
-        private sealed class FeedResult { internal ComponentUpdate Update; }
 
         public static ComponentUpdate Parse(string json, string current, string architecture = null)
         {
@@ -102,7 +122,7 @@ namespace LxMusic.Bridge.Online
             if (assets.Length != 1 || assets[0].Value<string>("state") != "uploaded")
                 throw new InvalidOperationException("发布页缺少当前播放器对应的安装包，请稍后重试");
             var selected = assets[0];
-            update.PackageUrl = selected.Value<string>("browser_download_url");
+            update.PackageUrl = NormalizePackageUrl(selected.Value<string>("browser_download_url"));
             update.Sha256 = selected.Value<string>("digest");
             update.Size = selected.Value<long?>("size") ?? 0;
             ValidatePackage(update);
@@ -123,23 +143,24 @@ namespace LxMusic.Bridge.Online
             if (update == null) throw new InvalidOperationException("更新安装包地址无效");
             var repositoryPath = "lumiliya2009/foo_lxmusic@" + update.Version + "/downloads/" + update.PackageName;
             var releaseUrl = Downloads + update.Version + "/" + update.PackageName;
-            return new[]
-            {
-                "https://gcore.jsdelivr.net/gh/" + repositoryPath,
-                "https://ghfast.top/" + releaseUrl,
-                "https://gh-proxy.org/" + releaseUrl,
-                "https://gh-proxy.com/" + releaseUrl,
-                "https://fastly.jsdelivr.net/gh/" + repositoryPath,
-                "https://cdn.jsdelivr.net/gh/" + repositoryPath,
-                releaseUrl
-            };
+            var urls = new List<string>();
+            var privatePackage = PrivatePackageUrl(update.PackageName);
+            if (!string.IsNullOrWhiteSpace(privatePackage)) urls.Add(privatePackage);
+            urls.Add("https://gcore.jsdelivr.net/gh/" + repositoryPath);
+            urls.Add("https://ghfast.top/" + releaseUrl);
+            urls.Add("https://gh-proxy.org/" + releaseUrl);
+            urls.Add("https://gh-proxy.com/" + releaseUrl);
+            urls.Add("https://fastly.jsdelivr.net/gh/" + repositoryPath);
+            urls.Add("https://cdn.jsdelivr.net/gh/" + repositoryPath);
+            urls.Add(releaseUrl);
+            return urls.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
 
         public static void ValidatePackage(ComponentUpdate update)
         {
             if (update == null || update.PackageName != PackageName(update.Version, update.Architecture) ||
                 update.Url != Releases + update.Version ||
-                update.PackageUrl != Downloads + update.Version + "/" + update.PackageName)
+                !IsAllowedPackageUrl(update.PackageUrl, update.Version, update.PackageName))
                 throw new InvalidOperationException("更新安装包地址无效");
             if (update.Size < 1 || update.Size > MaxPackageBytes || update.Sha256 == null ||
                 !Regex.IsMatch(update.Sha256, @"\Asha256:[0-9a-fA-F]{64}\z"))
@@ -152,6 +173,61 @@ namespace LxMusic.Bridge.Online
             var text = value.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
             if (text.Length > 4096) text = text.Substring(0, 4096).TrimEnd();
             return text;
+        }
+
+        private static string[] FallbackFeedUrls()
+        {
+            var result = new List<string>();
+            result.Add("https://api.github.com/repos/lumiliya2009/foo_lxmusic/releases/latest");
+            result.Add("https://raw.githubusercontent.com/lumiliya2009/foo_lxmusic/main/update.json");
+            result.Add("https://cdn.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json");
+            result.Add("https://fastly.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json");
+            result.Add("https://gcore.jsdelivr.net/gh/lumiliya2009/foo_lxmusic@main/update.json");
+            return result.ToArray();
+        }
+
+        private static string PrivateUpdateBase()
+        {
+            try
+            {
+                var type = typeof(UpdateChecker).Assembly.GetType("LxMusic.Bridge.Online.PrivateUpdateEndpoint");
+                var value = type?.GetProperty("Value", System.Reflection.BindingFlags.Static |
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)?.GetValue(null, null) as string;
+                if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+                var uri = new Uri(value, UriKind.Absolute);
+                return uri.Scheme == Uri.UriSchemeHttps ? value.TrimEnd('/') + "/" : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string PrivateFeedUrl()
+        {
+            var root = PrivateUpdateBase();
+            return root.Length == 0 ? string.Empty : new Uri(new Uri(root), "foo_lxmusic-update.json").ToString();
+        }
+
+        private static string PrivatePackageUrl(string packageName)
+        {
+            var root = PrivateUpdateBase();
+            return root.Length == 0 ? string.Empty : new Uri(new Uri(root), packageName).ToString();
+        }
+
+        private static string NormalizePackageUrl(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            if (Uri.TryCreate(value, UriKind.Absolute, out _)) return value;
+            var root = PrivateUpdateBase();
+            return root.Length == 0 ? value : new Uri(new Uri(root), value.TrimStart('/')).ToString();
+        }
+
+        private static bool IsAllowedPackageUrl(string value, string version, string packageName)
+        {
+            if (value == Downloads + version + "/" + packageName) return true;
+            var privatePackage = PrivatePackageUrl(packageName);
+            return privatePackage.Length > 0 && string.Equals(value, privatePackage, StringComparison.OrdinalIgnoreCase);
         }
 
         private static Version ParseVersion(string text)

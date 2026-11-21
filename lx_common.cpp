@@ -69,6 +69,9 @@ bool Payload::is_collection() const {
     const auto& kind = get(pf_kind);
     return kind == "album" || kind == "artist" || kind == "playlist";
 }
+bool is_ranking_payload(const Payload& payload) {
+    return payload.is_collection() && payload.get(pf_collection_kind) == "Ranking";
+}
 
 std::string base64url_encode(const void* data, size_t bytes) {
     static constexpr char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -229,7 +232,7 @@ void payload_to_info(const Payload& payload, file_info& info, size_t number, siz
     }
     info.meta_set("TITLE", title.c_str());
     const bool navigation = payload.is_navigation();
-    const bool ranking = payload.is_collection() && payload.get(pf_collection_kind) == "Ranking";
+    const bool ranking = is_ranking_payload(payload);
     if (!navigation && !ranking) {
         if (!payload.get(pf_artist).empty()) info.meta_set("ARTIST", payload.get(pf_artist).c_str());
         if (!payload.get(pf_album).empty()) info.meta_set("ALBUM", payload.get(pf_album).c_str());
@@ -242,9 +245,16 @@ void payload_to_info(const Payload& payload, file_info& info, size_t number, siz
         info.set_length(0);
         info.info_set("encoding", "LX search navigation - Enter to open");
     } else if (payload.is_collection()) {
-        if (!ranking) {
-            info.meta_set("ALBUM", payload.get(pf_platform_label).c_str());
-        }
+        if (ranking) {
+            // Some foobar2000 themes render unknown fields as "?". Present empty
+            // values instead so conditional title formats omit every field except
+            // the catalog title and no synthetic 0:00 duration is shown.
+            info.meta_set("ARTIST", "");
+            info.meta_set("ALBUM", "");
+            info.meta_set("ALBUM ARTIST", "");
+            info.meta_set("TRACKNUMBER", "");
+            info.info_set("length", "");
+        } else info.meta_set("ALBUM", payload.get(pf_platform_label).c_str());
         info.info_set("encoding", "LX collection result - Enter to open");
     } else {
         info.info_set("encoding", "LX online source");

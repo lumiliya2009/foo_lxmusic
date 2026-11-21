@@ -82,7 +82,8 @@ namespace LxMusic.Bridge.Online
             int followMax = MaxRedirects,
             OnlineHttpRequestHandle handle = null,
             bool useSystemProxy = false,
-            bool forceDirect = false)
+            bool forceDirect = false,
+            Action<long, long> progress = null)
         {
             var currentUrl = ValidatePublicHttpUrl(url);
             var currentMethod = string.IsNullOrWhiteSpace(method) ? "GET" : method.ToUpperInvariant();
@@ -158,7 +159,7 @@ namespace LxMusic.Bridge.Online
                             continue;
                         }
 
-                        var bytes = ReadLimited(response.GetResponseStream(), maxBytes);
+                        var bytes = ReadLimited(response.GetResponseStream(), maxBytes, progress, response.ContentLength);
                         return Build(response, status, bytes, currentUrl);
                     }
                 }
@@ -332,7 +333,7 @@ namespace LxMusic.Bridge.Online
             }
         }
 
-        private static byte[] ReadLimited(Stream input, int maxBytes)
+        private static byte[] ReadLimited(Stream input, int maxBytes, Action<long, long> progress = null, long total = -1)
         {
             if (input == null) return Array.Empty<byte>();
             var limit = Math.Max(1024, Math.Min(32 * 1024 * 1024, maxBytes));
@@ -340,11 +341,22 @@ namespace LxMusic.Bridge.Online
             {
                 var buffer = new byte[16 * 1024];
                 int read;
+                var lastReport = DateTime.MinValue;
                 while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
                 {
                     if (memory.Length + read > limit) throw new InvalidOperationException("在线响应过大");
                     memory.Write(buffer, 0, read);
+                    if (progress != null)
+                    {
+                        var now = DateTime.UtcNow;
+                        if ((now - lastReport).TotalMilliseconds >= 120)
+                        {
+                            lastReport = now;
+                            progress(memory.Length, total);
+                        }
+                    }
                 }
+                if (progress != null) progress(memory.Length, total);
                 return memory.ToArray();
             }
         }

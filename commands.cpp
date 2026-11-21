@@ -25,10 +25,10 @@ std::vector<std::weak_ptr<page_request>> g_page_requests;
 std::atomic_bool g_update_pending{ false };
 struct update_guard { ~update_guard() { g_update_pending = false; } };
 cfg_string g_last_update_check({ 0x628a3dae, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
-cfg_string g_notified_update({ 0x628a3daf, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, "");
 UINT_PTR g_update_timer = 0;
 std::time_t g_next_update_attempt = 0;
 bool g_updates_stopping = false;
+constexpr std::time_t automatic_update_interval = 60 * 60;
 
 void CALLBACK update_timer(HWND, UINT, UINT_PTR, DWORD) {
     if (g_updates_stopping || !automatic_updates_enabled() || g_update_pending) return;
@@ -36,7 +36,7 @@ void CALLBACK update_timer(HWND, UINT, UINT_PTR, DWORD) {
     if (now < g_next_update_attempt) return;
     std::time_t last = 0;
     try { last = static_cast<std::time_t>(std::stoll(g_last_update_check.get().c_str())); } catch (...) {}
-    if (last <= now && now - last < 24 * 60 * 60) return;
+    if (last <= now && now - last < automatic_update_interval) return;
     g_next_update_attempt = now + 10 * 60;
     command_check_update(true);
 }
@@ -421,6 +421,20 @@ uint64_t unsigned_field(const BridgeLine& line, size_t index) {
     if (index >= line.fields.size()) return 0;
     try { return std::stoull(line.fields[index]); }
     catch (...) { return 0; }
+}
+
+void update_component_progress(threaded_process_status& status, const BridgeLine& line) {
+    if (line.fields.empty()) return;
+    if (line.fields[0] == "STATUS" && line.fields.size() >= 2) {
+        try { status.set_item(base64url_decode(line.fields[1]).c_str()); } catch (...) {}
+    }
+    else if (line.fields[0] == "PROGRESS" && line.fields.size() >= 3) {
+        const auto received = unsigned_field(line, 1);
+        const auto total = unsigned_field(line, 2);
+        if (total > 0) status.set_progress(
+            static_cast<t_size>(std::min<uint64_t>(received, total)),
+            static_cast<t_size>(total));
+    }
 }
 
 void update_download_progress(threaded_process_status& status, const BridgeLine& line) {
@@ -854,13 +868,7 @@ void command_check_update(bool automatic) {
             }
             for (const auto& line : state.result.lines) {
                 if (line.fields.size() >= 4 && line.fields[0] == "UPDATE") {
-                    if (automatic && line.fields[2] == g_notified_update.get().c_str()) return;
-                    g_notified_update = line.fields[2].c_str();
-                    auto message = "发现新版本 " + line.fields[2] + "。\n\n";
-                    if (!changelog.empty()) message += "更新内容：\n" + changelog + "\n\n";
-                    message += "是否下载并安装？下载校验完成后将自动重启 foobar2000。";
-                    if (MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
-                        L"LX 在线音乐更新", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) return;
+                    if (!show_update_dialog(line.fields[2], changelog)) return;
                     std::vector<wchar_t> host(32768);
                     const auto length = GetModuleFileNameW(nullptr, host.data(), static_cast<DWORD>(host.size()));
                     if (length == 0 || length >= host.size()) throw std::runtime_error("无法获取播放器路径");
@@ -869,25 +877,48 @@ void command_check_update(bool automatic) {
                     const auto target = base64url_encode_text(component_directory());
                     const auto executable = base64url_encode_text(host_path);
                     const auto parent = std::to_string(GetCurrentProcessId());
-                    run_task("下载安装包",
-                        [pending, metadata, target, executable, parent](async_state& download, threaded_process_status&, abort_callback& abort) {
-                            download.result = run_bridge({ "prepare-update", metadata, target, executable, parent }, abort);
-                        },
-                        [pending](async_state& download) {
-                            for (const auto& record : download.result.lines) {
-                                if (record.fields.size() == 2 && record.fields[0] == "READY") {
-                                    if (!standard_commands::main_exit()) {
-                                        const auto cancel = base64url_decode(record.fields[1]) + "\\cancel";
-                                        const auto marker = CreateFileW(pfc::stringcvt::string_wide_from_utf8(cancel.c_str()),
-                                            GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-                                        if (marker != INVALID_HANDLE_VALUE) CloseHandle(marker);
-                                        throw std::runtime_error("无法退出播放器，本次更新未安装");
-                                    }
-                                    return;
-                                }
+                    auto download = std::make_shared<async_state>();
+                    auto task = threaded_process_callback_lambda::create(
+                        threaded_process_callback_lambda::on_init_t{},
+                        [download, metadata, target, executable, parent](threaded_process_status& status, abort_callback& abort) {
+                            status.set_item("正在读取更新任务…");
+                            status.set_progress(0, 1000);
+                            try {
+                                download->result = run_bridge({ "prepare-update", metadata, target, executable, parent }, abort,
+                                    [&status](const BridgeLine& line) { update_component_progress(status, line); });
                             }
-                            throw std::runtime_error("更新助手未就绪，原版本未改动");
+                            catch (const exception_aborted&) {
+                                throw;
+                            }
+                            catch (const std::exception& ex) {
+                                download->error = ex.what();
+                            }
+                            catch (...) {
+                                download->error = "下载更新时发生未知错误";
+                            }
+                        },
+                        [download, pending](threaded_process_callback::ctx_t, bool aborted) {
+                            if (aborted) return;
+                            if (!download->error.empty()) {
+                                popup_message::g_complain("LX 组件更新失败", download->error.c_str());
+                                return;
+                            }
+                            for (const auto& record : download->result.lines) {
+                                if (record.fields.size() != 2 || record.fields[0] != "READY") continue;
+                                if (!standard_commands::main_exit()) {
+                                    const auto cancel = base64url_decode(record.fields[1]) + "\\cancel";
+                                    const auto marker = CreateFileW(pfc::stringcvt::string_wide_from_utf8(cancel.c_str()),
+                                        GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                                    if (marker != INVALID_HANDLE_VALUE) CloseHandle(marker);
+                                    popup_message::g_complain("LX 组件更新失败", "无法退出播放器，本次更新未安装");
+                                }
+                                return;
+                            }
+                            popup_message::g_complain("LX 组件更新失败", "更新助手未就绪，原版本未改动");
                         });
+                    threaded_process::g_run_modal(task,
+                        threaded_process::flag_show_abort | threaded_process::flag_show_progress |
+                        threaded_process::flag_show_item, core_api::get_main_window(), "LX 组件更新");
                     return;
                 }
             }
