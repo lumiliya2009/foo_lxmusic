@@ -1214,6 +1214,11 @@ public:
         else out = "LX 在线音乐搜索与音源管理。";
         return index < count;
     }
+    bool get_display(t_uint32 index, pfc::string_base& out, t_uint32& flags) override {
+        if (index == page_previous || index == page_next || index == page_last ||
+            index == page_jump || index == lyrics || index == back) return false;
+        return mainmenu_commands::get_display(index, out, flags);
+    }
     GUID get_parent() override { return guid_main_group; }
     void execute(t_uint32 index, service_ptr_t<service_base>) override {
         switch (index) {

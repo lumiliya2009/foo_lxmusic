@@ -235,12 +235,19 @@ void payload_to_info(const Payload& payload, file_info& info, size_t number, siz
     info.meta_set("LX_ID", payload.get(pf_id).c_str());
     if (!payload.get(pf_preferred_quality).empty()) info.meta_set("LX_QUALITY", payload.get(pf_preferred_quality).c_str());
     if (payload.is_navigation()) {
-        info.meta_set("ARTIST", " ");
-        info.meta_set("ALBUM", " ");
+        info.meta_set("ARTIST", "");
+        info.meta_set("ALBUM", "");
         info.set_length(0.001);
         info.info_set("encoding", "LX search navigation - Enter to open");
     } else if (payload.is_collection()) {
+        if (payload.get(pf_collection_kind) == "Ranking") {
+            const auto subtitle = payload.get(pf_artist);
+            if (!subtitle.empty() && subtitle != title)
+                info.meta_set("TITLE", (title + " · " + subtitle).c_str());
+            info.meta_set("ARTIST", "");
+        }
         info.meta_set("ALBUM", payload.get(pf_platform_label).c_str());
+        info.set_length(0.001);
         info.info_set("encoding", "LX collection result - Enter to open");
     } else {
         info.info_set("encoding", "LX online source");
