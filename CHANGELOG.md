@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.11
+
+- Edit imported source scripts directly, including configured cookies.
+- Remove the confirmation dialog shown before importing a source.
+- Show source version, author, description, supported platforms and qualities.
+- Check paid-source updates through LX `updateAlert`, or open the provided update page.
+- Copy the address of a source imported from a URL.
+- Use status messages for update checks and direct-link copies.
+- Add open-folder and close buttons to the download completion dialog.
+
 ## 0.1.10
 
 - Download all search pages with configurable parallel tasks, failure skipping and post-download duplicate cleanup.

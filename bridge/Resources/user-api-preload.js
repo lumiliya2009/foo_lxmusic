@@ -322,6 +322,9 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
       sources: {},
     }
     try {
+      for (const field of ['name', 'version', 'author', 'description', 'homepage']) {
+        if (typeof info[field] === 'string') sourceInfo[field] = info[field].substring(0, field === 'description' ? 8192 : 512)
+      }
       for (const source of Object.keys(info.sources || {})) {
         const userSource = info.sources[source]
         if (!userSource || userSource.type !== 'music') continue

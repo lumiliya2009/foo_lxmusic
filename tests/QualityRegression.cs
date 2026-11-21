@@ -47,6 +47,27 @@ static class QualityRegression
         }
     }
 
+    static Result BridgeInput(string command, string input, params string[] args)
+    {
+        var start = new ProcessStartInfo(typeof(OnlineMusicRepository).Assembly.Location,
+            string.Join(" ", new[] { command, Encode(profile) }.Concat(args)))
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+        };
+        using (var process = Process.Start(start))
+        {
+            process.StandardInput.Write(input);
+            process.StandardInput.Close();
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(20000)) { process.Kill(); throw new Exception("bridge input fixture timed out"); }
+            Check(error.Result.Length == 0, "unexpected bridge stderr: " + error.Result);
+            return new Result { Code = process.ExitCode, Lines = output.Result.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(line => line.Split('\t')).ToList() };
+        }
+    }
+
     static string Payload(string mode = "ok", string qualities = "flac,320k,128k")
     {
         var fields = new[] { "1", "track", "qq", "tx", "fixture", "same-song", "测试歌曲", "测试歌手", "测试专辑", "240000", "", qualities,
@@ -315,6 +336,96 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qu
         }
     }
 
+    static void TestSourceManagement()
+    {
+        var originalProfile = profile;
+        profile = Path.Combine(originalProfile, "source-management");
+        Directory.CreateDirectory(profile);
+        try
+        {
+            var path = Path.Combine(profile, "paid-source.js");
+            var script = @"/**
+ * @name ikun音源[赞助][年卡]
+ * @version v27
+ * @author ikunshare
+ * @description QQ群329970458
+ * 过期时间：2027-01-01
+ */
+const savedCookie = 'COOKIE_ORIGINAL';
+lx.on(lx.EVENT_NAMES.request, () => 'https://fixture.invalid/paid');
+lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['128k','320k','flac','master']}}});
+";
+            File.WriteAllText(path, script);
+            Check(Bridge("import-file", Encode(path)).Code == 0, "editable source import failed");
+            var row = Bridge("source-options").Lines.Single(line => line[0] == "SOURCE");
+            Check(row.Length >= 7, "source metadata/revision was not exported");
+            var details = Decode(row[4]);
+            Check(details.Contains("ikun音源[赞助][年卡]") && details.Contains("作者：ikunshare") &&
+                details.Contains("标准音质") && details.Contains("母带音质") && details.Contains("过期时间：2027-01-01"),
+                "source description or quality details lost: " + details);
+            Check(row[5] == "0", "local source advertised a network address");
+            var id = row[1]; var revision = row[6];
+            var loaded = Bridge("source-script", id);
+            Check(loaded.Code == 0 && Decode(loaded.Lines.Single(line => line[0] == "SCRIPT")[1]) == script, "source script roundtrip failed");
+
+            var edited = script.Replace("COOKIE_ORIGINAL", "COOKIE_EDITED").Replace("@version v27", "@version v28");
+            var saved = BridgeInput("edit-source", edited, id, revision);
+            Check(saved.Code == 0, "valid cookie edit failed");
+            var editedRow = Bridge("source-options").Lines.Single(line => line[0] == "SOURCE");
+            Check(editedRow[1] == id && Decode(editedRow[4]).Contains("版本：v28"), "edit changed source ID or metadata");
+            var roundtrip = Bridge("source-script", id);
+            Check(Decode(roundtrip.Lines.Single(line => line[0] == "SCRIPT")[1]).Contains("COOKIE_EDITED"), "edited cookie was not saved");
+
+            var libraryFile = Path.Combine(profile, "online-source.json");
+            var beforeBadEdit = File.ReadAllBytes(libraryFile);
+            var invalid = BridgeInput("edit-source", "throw new Error(COOKIE_EDITED);", id, editedRow[6]);
+            Check(invalid.Code != 0 && File.ReadAllBytes(libraryFile).SequenceEqual(beforeBadEdit), "invalid script overwrote source or leaked partial edit");
+            var conflict = BridgeInput("edit-source", edited.Replace("COOKIE_EDITED", "COOKIE_STALE"), id, revision);
+            Check(conflict.Code != 0 && File.ReadAllBytes(libraryFile).SequenceEqual(beforeBadEdit), "stale edit overwrote a newer source revision");
+            Check(Bridge("source-url", id).Code != 0, "local source exposed a copyable URL");
+            Check(Bridge("update-source", id, editedRow[6]).Code != 0, "local source accepted network update");
+
+            var urlOriginalProfile = profile;
+            profile = Path.Combine(urlOriginalProfile, "url-source");
+            Directory.CreateDirectory(profile);
+            try
+            {
+                const string urlScript = "/* @name URL source */\nlx.on(lx.EVENT_NAMES.request,()=> 'https://fixture.invalid/url');lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['flac']}}});";
+                LxSourceDescriptor descriptor;
+                using (var runtime = LxSourceRuntime.Create(urlScript, "url-source", TimeSpan.FromSeconds(10))) descriptor = runtime.Descriptor;
+                var stored = new StoredOnlineSource { Id = Guid.NewGuid().ToString("N"), Url = "https://example.com/private-source?key=fixture",
+                    Script = urlScript, Descriptor = descriptor };
+                var root = JObject.FromObject(stored);
+                root["libraryVersion"] = 1; root["activeId"] = stored.Id; root["sources"] = new JArray(JObject.FromObject(stored));
+                var bytes = new byte[] { 0 }.Concat(Encoding.UTF8.GetBytes(root.ToString())).ToArray();
+                File.WriteAllBytes(Path.Combine(profile, "online-source.json"), bytes);
+                var urlRow = Bridge("source-options").Lines.Single(line => line[0] == "SOURCE");
+                Check(urlRow.Length >= 7 && urlRow[5] == "1", "network source address availability was not exported");
+                var copied = Bridge("source-url", urlRow[1]);
+                Check(copied.Code == 0 && Decode(copied.Lines.Single(line => line[0] == "URL")[1]) == stored.Url,
+                    "network source address could not be copied");
+            }
+            finally { profile = urlOriginalProfile; }
+        }
+        finally { profile = originalProfile; }
+    }
+
+    static void TestSourceUpdateAlert()
+    {
+        const string script = @"
+lx.on(lx.EVENT_NAMES.request, () => 'https://fixture.invalid/alert');
+lx.send(lx.EVENT_NAMES.updateAlert,{log:'fixture update available',updateUrl:'https://example.com/source-update'});
+lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['flac']}}});
+";
+        using (var runtime = LxSourceRuntime.Create(script, "update-alert", TimeSpan.FromSeconds(10)))
+        {
+            Check(runtime.UpdateChecked.Wait(TimeSpan.FromSeconds(2)), "source updateAlert was not captured");
+            var notice = runtime.UpdateChecked.Result;
+            Check(notice.Message == "fixture update available" && notice.Url == "https://example.com/source-update",
+                "source updateAlert fields were lost");
+        }
+    }
+
     static void TestUpdates()
     {
         Func<string, string> json = version => "{\"tag_name\":\"" + version + "\",\"html_url\":\"https://github.com/lumiliya2009/foo_lxmusic/releases/tag/" + version + "\"}";
@@ -468,6 +579,8 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{wy:{type:'music',actions:['musicUrl'],qu
             TestOrdering();
             TestBridge();
             TestLibrary();
+            TestSourceManagement();
+            TestSourceUpdateAlert();
             TestCompatibility();
             TestUpdates();
             TestSearchPagination();

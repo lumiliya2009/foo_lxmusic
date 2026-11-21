@@ -36,6 +36,8 @@ namespace LxMusic.Bridge.Online
         private readonly BlockingCollection<Action> _queue = new BlockingCollection<Action>();
         private readonly TaskCompletionSource<LxSourceDescriptor> _initialized =
             new TaskCompletionSource<LxSourceDescriptor>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<SourceUpdateNotice> _updateChecked =
+            new TaskCompletionSource<SourceUpdateNotice>(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _pending =
             new ConcurrentDictionary<string, TaskCompletionSource<string>>();
         private readonly ConcurrentDictionary<string, OnlineHttpRequestHandle> _activeRequests =
@@ -58,6 +60,7 @@ namespace LxMusic.Bridge.Online
         }
 
         public LxSourceDescriptor Descriptor => _descriptor;
+        public Task<SourceUpdateNotice> UpdateChecked => _updateChecked.Task;
 
         public static LxSourceRuntime Create(string script, string key, TimeSpan timeout)
         {
@@ -152,9 +155,8 @@ namespace LxMusic.Bridge.Online
 
         private string Metadata(string name, string fallback)
         {
-            var match = System.Text.RegularExpressions.Regex.Match(_script,
-                "(?im)^\\s*\\*?\\s*@" + System.Text.RegularExpressions.Regex.Escape(name) + "\\s+(.+?)\\s*$");
-            var value = match.Success ? match.Groups[1].Value.Trim() : string.Empty;
+            var fields = SourceMetadata.Read(_script);
+            var value = fields.TryGetValue(name, out var found) ? found : string.Empty;
             return string.IsNullOrWhiteSpace(value) ? fallback : value;
         }
 
@@ -178,7 +180,7 @@ namespace LxMusic.Bridge.Online
                     case "request": HandleScriptRequest(dataJson); break;
                     case "cancelRequest": HandleCancelRequest(dataJson); break;
                     case "response": HandleInvocationResponse(dataJson); break;
-                    case "showUpdateAlert": break;
+                    case "showUpdateAlert": HandleUpdateAlert(dataJson); break;
                 }
             }
             catch (Exception ex)
@@ -201,8 +203,7 @@ namespace LxMusic.Bridge.Online
                 }
                 var info = payload["info"] as JObject ?? payload;
                 var descriptor = ParseDescriptor(info);
-                if (descriptor.Name == "LX 在线音源") descriptor.Name = Metadata("name", descriptor.Name);
-                if (string.IsNullOrWhiteSpace(descriptor.Version)) descriptor.Version = Metadata("version", string.Empty);
+                SourceMetadata.Complete(descriptor, _script);
                 _descriptor = descriptor;
                 _initialized.TrySetResult(descriptor);
             }
@@ -212,12 +213,37 @@ namespace LxMusic.Bridge.Online
             }
         }
 
+        private void HandleUpdateAlert(string dataJson)
+        {
+            try
+            {
+                var payload = JObject.Parse(dataJson ?? "{}");
+                var message = (payload.Value<string>("log") ?? string.Empty).Trim();
+                var url = (payload.Value<string>("updateUrl") ?? string.Empty).Trim();
+                if (url.Length > 0)
+                {
+                    if (url.Length > 2048 || !Uri.TryCreate(url, UriKind.Absolute, out var parsed) ||
+                        (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps)) url = string.Empty;
+                }
+                if (message.Length == 0 && url.Length == 0) return;
+                _updateChecked.TrySetResult(new SourceUpdateNotice
+                {
+                    Message = message.Length > 4096 ? message.Substring(0, 4096) : message,
+                    Url = url
+                });
+            }
+            catch { }
+        }
+
         public static LxSourceDescriptor ParseDescriptor(JObject info)
         {
             var descriptor = new LxSourceDescriptor
             {
                 Name = info.Value<string>("name") ?? "LX 在线音源",
-                Version = info.Value<string>("version") ?? string.Empty
+                Version = info.Value<string>("version") ?? string.Empty,
+                Author = info.Value<string>("author") ?? string.Empty,
+                Description = info.Value<string>("description") ?? string.Empty,
+                Homepage = info.Value<string>("homepage") ?? string.Empty
             };
             var sources = info["sources"] as JObject;
             if (sources != null)

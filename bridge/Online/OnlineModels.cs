@@ -254,6 +254,9 @@ namespace LxMusic.Bridge.Online
     {
         public string Name { get; set; } = "LX 在线音源";
         public string Version { get; set; } = string.Empty;
+        public string Author { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Homepage { get; set; } = string.Empty;
         public Dictionary<string, List<string>> Sources { get; set; } = new Dictionary<string, List<string>>();
         public Dictionary<string, List<string>> Actions { get; set; } = new Dictionary<string, List<string>>();
         public Dictionary<string, string> Names { get; set; } = new Dictionary<string, string>();
@@ -317,10 +320,23 @@ namespace LxMusic.Bridge.Online
         public string Name { get; set; } = "未导入在线音源";
         public string Version { get; set; } = string.Empty;
         public string Host { get; set; } = string.Empty;
+        public bool UrlAvailable { get; set; }
         public bool Imported { get; set; }
         public LxSourceDescriptor Descriptor { get; set; } = new LxSourceDescriptor();
         public OnlinePlatform DefaultPlatform { get; set; } = OnlinePlatform.Qq;
         public OnlineQuality PreferredQuality { get; set; } = OnlineQuality.High;
+    }
+
+    public sealed class SourceUpdateNotice
+    {
+        public string Message { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
+    }
+
+    public sealed class SourceUpdateResult
+    {
+        public LxSourceDescriptor Descriptor { get; set; }
+        public SourceUpdateNotice Notice { get; set; }
     }
 
     public sealed class OnlineComment

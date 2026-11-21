@@ -246,7 +246,15 @@ std::vector<SourceOption> source_options(const BridgeResult& result) {
         const auto& f = line.fields;
         if (f.size() >= 4 && f[0] == "SOURCE") {
             if (f[1].size() != 32 || f[1].find_first_not_of("0123456789abcdef") != std::string::npos) continue;
-            sources.push_back({ f[1], base64url_decode(f[2]), f[3] == "1", {} });
+            SourceOption source;
+            source.id = f[1];
+            source.name = base64url_decode(f[2]);
+            source.active = f[3] == "1";
+            if (f.size() >= 5) source.details = base64url_decode(f[4]);
+            source.url_available = f.size() >= 6 && f[5] == "1";
+            if (f.size() >= 7 && f[6].size() == 64 && f[6].find_first_not_of("0123456789abcdef") == std::string::npos)
+                source.revision = f[6];
+            sources.push_back(std::move(source));
         } else if (f.size() >= 5 && f[0] == "SITE") {
             if (f[4] == "unavailable") continue;
             // Keep source-declared platforms extensible, with safe CLI IDs.
@@ -258,10 +266,33 @@ std::vector<SourceOption> source_options(const BridgeResult& result) {
     return sources;
 }
 
-bool confirm_script_import() {
-    return MessageBoxW(core_api::get_main_window(),
-        L"LX 音源脚本属于可执行代码。插件会在受限的 Jint 环境中运行它并允许其联网。\n\n请仅导入你信任的脚本。是否继续？",
-        L"导入 LX 音源", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES;
+void show_status(const std::string& message) {
+    static service_ptr_t<ui_status_text_override> status;
+    if (!status.is_valid()) ui_control::get()->override_status_text_create(status);
+    if (status.is_valid()) status->override_text(message.c_str());
+}
+
+void copy_text_to_clipboard(const std::string& text) {
+    if (text.empty() || text.size() > 65536 || text.find('\0') != std::string::npos)
+        throw std::runtime_error("无法复制无效文本");
+    const std::wstring value = pfc::stringcvt::string_wide_from_utf8(text.c_str()).get_ptr();
+    const auto bytes = (value.size() + 1) * sizeof(wchar_t);
+    const auto memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!memory) throw std::runtime_error("无法分配剪贴板内存");
+    const auto data = GlobalLock(memory);
+    if (!data) { GlobalFree(memory); throw std::runtime_error("无法写入剪贴板"); }
+    std::memcpy(data, value.c_str(), bytes);
+    GlobalUnlock(memory);
+    if (!OpenClipboard(core_api::get_main_window())) {
+        GlobalFree(memory);
+        throw std::runtime_error("剪贴板正被占用，请稍后重试");
+    }
+    const bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory) != nullptr;
+    CloseClipboard();
+    if (!copied) {
+        GlobalFree(memory);
+        throw std::runtime_error("无法复制到剪贴板，请重试");
+    }
 }
 
 void start_bridge_message(const char* title, std::vector<std::string> args, std::function<void()> next = {}) {
@@ -274,7 +305,98 @@ void start_bridge_message(const char* title, std::vector<std::string> args, std:
             if (next) { next(); return; }
             auto message = bridge_message(state.result);
             if (message.empty()) message = "操作完成";
-            popup_message::g_show(message.c_str(), "LX 在线音乐");
+            show_status(message);
+        }, true);
+}
+
+void save_source_edit(const std::string& id, const std::string& revision,
+    std::string title, std::string script) {
+    auto state = std::make_shared<async_state>();
+    fb2k::splitTask([state, id, revision, title, script] {
+        try {
+            state->result = run_bridge({ "edit-source", id, revision }, fb2k::noAbort, {}, &script);
+        } catch (const std::exception& ex) {
+            state->error = ex.what();
+        } catch (...) {
+            state->error = "保存音源时发生未知错误";
+        }
+        fb2k::inMainThread([state, id, revision, title, script] {
+            if (state->error.empty()) {
+                show_status("音源已保存");
+                command_manage_sources();
+                return;
+            }
+            popup_message::g_complain("保存音源失败", state->error.c_str());
+            std::string retry_script = script;
+            std::string retry_revision = revision;
+            if (show_source_editor(title + "（校验失败，内容已保留）", retry_script, retry_revision))
+                save_source_edit(id, retry_revision, title, std::move(retry_script));
+        });
+    });
+}
+
+void edit_source(const SourceOption& source) {
+    run_task("读取音源脚本",
+        [id = source.id](async_state& state, threaded_process_status&, abort_callback& abort) {
+            state.result = run_bridge({ "source-script", id }, abort);
+        },
+        [source](async_state& state) {
+            std::string script, revision;
+            for (const auto& line : state.result.lines) {
+                if (line.fields.size() >= 3 && line.fields[0] == "SCRIPT") {
+                    script = base64url_decode(line.fields[1]);
+                    revision = line.fields[2];
+                    break;
+                }
+            }
+            if (script.empty() || revision.size() != 64) throw std::runtime_error("音源脚本读取失败");
+            if (show_source_editor("编辑 LX 音源 - " + source.name, script, revision))
+                save_source_edit(source.id, revision, source.name, std::move(script));
+        }, true);
+}
+
+void update_source(const SourceOption& source) {
+    run_task("检查音源更新",
+        [source](async_state& state, threaded_process_status&, abort_callback& abort) {
+            state.result = run_bridge({ "update-source", source.id, source.revision }, abort);
+        },
+        [](async_state& state) {
+            for (const auto& line : state.result.lines) {
+                if (line.fields.size() >= 3 && line.fields[0] == "UPDATE_NOTICE") {
+                    auto message = base64url_decode(line.fields[1]);
+                    auto url = base64url_decode(line.fields[2]);
+                    if (message.empty()) message = "音源提示有新版本。";
+                    if (url.rfind("https://", 0) == 0 || url.rfind("http://", 0) == 0) {
+                        message += "\n\n是否打开音源提供的更新地址？";
+                        if (MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
+                            L"LX 音源更新", MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON1) == IDYES)
+                            ShellExecuteW(core_api::get_main_window(), L"open",
+                                pfc::stringcvt::string_wide_from_utf8(url.c_str()), nullptr, nullptr, SW_SHOWNORMAL);
+                        else show_status("音源有可用更新");
+                    } else {
+                        MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
+                            L"LX 音源更新", MB_OK | MB_ICONINFORMATION);
+                    }
+                    return;
+                }
+            }
+            auto message = bridge_message(state.result);
+            if (message.empty()) throw std::runtime_error("未能取得音源更新结果");
+            show_status(message);
+            command_manage_sources();
+        }, true);
+}
+
+void copy_source_url(const SourceOption& source) {
+    run_task("复制音源地址",
+        [id = source.id](async_state& state, threaded_process_status&, abort_callback& abort) {
+            state.result = run_bridge({ "source-url", id }, abort);
+        },
+        [](async_state& state) {
+            auto address = bridge_message(state.result, "URL");
+            if (address.empty()) throw std::runtime_error("未能读取音源地址");
+            copy_text_to_clipboard(address);
+            show_status("已复制音源地址");
         }, true);
 }
 
@@ -549,8 +671,16 @@ void command_manage_sources() {
                 if (MessageBoxW(core_api::get_main_window(), L"删除选中的音源？其他音源会保留。", L"管理音源",
                     MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES) { command_manage_sources(); return; }
                 args = { "remove-source", selected };
+            } else if (action == SourceAction::edit || action == SourceAction::update ||
+                action == SourceAction::copy_url) {
+                const auto found = std::find_if(sources.begin(), sources.end(),
+                    [&selected](const SourceOption& source) { return source.id == selected; });
+                if (found == sources.end()) return;
+                if (action == SourceAction::edit) edit_source(*found);
+                else if (action == SourceAction::update) update_source(*found);
+                else copy_source_url(*found);
+                return;
             } else {
-                if (!confirm_script_import()) { command_manage_sources(); return; }
                 if (action == SourceAction::import_file) {
                     pfc::string8 path;
                     if (!uGetOpenFileName(core_api::get_main_window(), "JavaScript 音源脚本|*.js|所有文件|*.*", 0,
@@ -581,7 +711,7 @@ void stop_update_checks() {
 void command_check_update(bool automatic) {
     if (g_updates_stopping || (automatic && !automatic_updates_enabled())) return;
     if (g_update_pending.exchange(true)) {
-        if (!automatic) popup_message::g_show("正在检查或下载安装包，请稍候。", "LX 在线音乐");
+        if (!automatic) show_status("正在检查或下载 LX 更新，请稍候");
         return;
     }
     const auto pending = std::make_shared<update_guard>();
@@ -632,7 +762,7 @@ void command_check_update(bool automatic) {
             }
             if (!automatic) {
                 const auto message = bridge_message(state.result);
-                popup_message::g_show(message.c_str(), "LX 在线音乐");
+                show_status(message.empty() ? "当前已是最新版本" : message);
             }
         }, false, automatic);
 }
@@ -655,26 +785,12 @@ void command_copy_link(metadb_handle_list_cref items) {
             if ((url.rfind("https://", 0) != 0 && url.rfind("http://", 0) != 0) ||
                 url.size() > 65536 || url.find('\0') != std::string::npos)
                 throw std::runtime_error("音源未返回有效的播放直链");
-            const std::wstring value = pfc::stringcvt::string_wide_from_utf8(url.c_str()).get_ptr();
-            const auto bytes = (value.size() + 1) * sizeof(wchar_t);
-            const auto memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
-            if (!memory) throw std::runtime_error("无法分配剪贴板内存");
-            const auto data = GlobalLock(memory);
-            if (!data) { GlobalFree(memory); throw std::runtime_error("无法写入剪贴板"); }
-            std::memcpy(data, value.c_str(), bytes);
-            GlobalUnlock(memory);
-            if (!OpenClipboard(core_api::get_main_window())) {
-                GlobalFree(memory); throw std::runtime_error("剪贴板正被占用，请稍后重试");
-            }
-            const bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory) != nullptr;
-            CloseClipboard();
-            if (!copied) { GlobalFree(memory); throw std::runtime_error("无法复制到剪贴板，请重试"); }
-            popup_message::g_show("已复制播放直链。", "LX 在线音乐");
+            copy_text_to_clipboard(url);
+            show_status("已复制播放直链");
         });
 }
 
 void command_import_file() {
-    if (!confirm_script_import()) return;
     pfc::string8 path;
     if (!uGetOpenFileName(core_api::get_main_window(), "JavaScript 音源脚本|*.js|所有文件|*.*", 0,
         "js", "选择 LX 音源脚本", nullptr, path, FALSE)) return;
@@ -682,7 +798,6 @@ void command_import_file() {
 }
 
 void command_import_url() {
-    if (!confirm_script_import()) return;
     std::string url;
     if (!show_url_dialog(url)) return;
     start_bridge_message("从网址导入 LX 音源", { "import-url", base64url_encode_text(url) });
@@ -817,7 +932,7 @@ void command_download(metadb_handle_list_cref items) {
             }
             delete_utf8_file(request_file);
         },
-        [state, request_file](threaded_process_callback::ctx_t, bool was_aborted) {
+        [state, request_file, output](threaded_process_callback::ctx_t, bool was_aborted) {
             delete_utf8_file(request_file);
             if (was_aborted) return;
             if (!state->error.empty()) {
@@ -826,7 +941,7 @@ void command_download(metadb_handle_list_cref items) {
             }
             auto message = bridge_message(state->result, "DONE");
             if (message.empty()) message = "下载任务完成。";
-            popup_message::g_show(message.c_str(), "LX 批量下载");
+            show_download_complete(message, output);
         });
     try {
         threaded_process::g_run_modeless(task,

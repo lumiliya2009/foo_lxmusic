@@ -253,7 +253,7 @@ std::string data_directory() {
 }
 
 BridgeResult run_bridge(const std::vector<std::string>& args, abort_callback& abort,
-    BridgeLineCallback on_line) {
+    BridgeLineCallback on_line, const std::string* standard_input) {
     if (args.empty()) throw std::runtime_error("缺少桥接命令");
     const auto directory = component_directory();
     const auto executable = directory + "\\foo_lx_bridge.exe";
@@ -277,6 +277,11 @@ BridgeResult run_bridge(const std::vector<std::string>& args, abort_callback& ab
     if (!CreatePipe(&read_raw, &write_raw, &security, 0)) throw std::runtime_error("无法创建桥接进程管道");
     win_handle read_pipe(read_raw), write_pipe(write_raw);
     SetHandleInformation(read_pipe.get(), HANDLE_FLAG_INHERIT, 0);
+    HANDLE input_read_raw = nullptr, input_write_raw = nullptr;
+    if (standard_input && !CreatePipe(&input_read_raw, &input_write_raw, &security, 0))
+        throw std::runtime_error("无法创建桥接输入管道");
+    win_handle input_read(input_read_raw), input_write(input_write_raw);
+    if (standard_input) SetHandleInformation(input_write.get(), HANDLE_FLAG_INHERIT, 0);
 
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
@@ -284,7 +289,7 @@ BridgeResult run_bridge(const std::vector<std::string>& args, abort_callback& ab
     startup.wShowWindow = SW_HIDE;
     startup.hStdOutput = write_pipe.get();
     startup.hStdError = write_pipe.get();
-    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdInput = standard_input ? input_read.get() : GetStdHandle(STD_INPUT_HANDLE);
     PROCESS_INFORMATION process{};
     std::vector<wchar_t> mutable_command(command.begin(), command.end());
     mutable_command.push_back(0);
@@ -295,6 +300,25 @@ BridgeResult run_bridge(const std::vector<std::string>& args, abort_callback& ab
     }
     win_handle process_handle(process.hProcess), thread_handle(process.hThread);
     write_pipe.reset();
+    input_read.reset();
+    if (standard_input) {
+        size_t offset = 0;
+        bool write_failed = false;
+        while (offset < standard_input->size()) {
+            DWORD written = 0;
+            const auto count = static_cast<DWORD>(std::min<size_t>(standard_input->size() - offset, 65536));
+            if (!WriteFile(input_write.get(), standard_input->data() + offset, count, &written, nullptr) || written == 0) {
+                write_failed = true;
+                break;
+            }
+            offset += written;
+        }
+        input_write.reset();
+        if (write_failed) {
+            WaitForSingleObject(process_handle.get(), 5000);
+            throw std::runtime_error("无法把音源脚本写入编辑进程");
+        }
+    }
 
     BridgeResult result;
     char buffer[8192];

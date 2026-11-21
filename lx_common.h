@@ -4,7 +4,7 @@ namespace lxmusic {
 
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 constexpr const char* kSchemeSuffix = ".lxmusic";
-constexpr const char* kVersion = "0.1.10";
+constexpr const char* kVersion = "0.1.11";
 
 enum PayloadField : size_t {
     pf_version = 0,
@@ -75,9 +75,11 @@ struct SourceSite { std::string id, label; bool collections = false, searchable 
 struct SourceOption {
     std::string id, name;
     bool active = false;
+    bool url_available = false;
+    std::string details, revision;
     std::vector<SourceSite> sites;
 };
-enum class SourceAction { close, import_file, import_url, remove, select };
+enum class SourceAction { close, import_file, import_url, remove, select, edit, update, copy_url };
 
 std::string base64url_encode(const void* data, size_t bytes);
 std::string base64url_encode_text(const std::string& text);
@@ -94,7 +96,7 @@ void install_collection_actions(t_size playlist);
 std::string component_directory();
 std::string data_directory();
 BridgeResult run_bridge(const std::vector<std::string>& args, abort_callback& abort,
-    BridgeLineCallback on_line = {});
+    BridgeLineCallback on_line = {}, const std::string* standard_input = nullptr);
 BridgeResult run_bridge_noabort(const std::vector<std::string>& args);
 std::vector<std::string> bridge_items(const BridgeResult& result);
 std::string bridge_message(const BridgeResult& result, const char* record = "OK");
@@ -118,8 +120,10 @@ std::string lyric_payload_for_handle(metadb_handle_ptr handle);
 bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources);
 bool show_page_dialog(const SearchPage& state, int& page);
 SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected);
+bool show_source_editor(const std::string& title, std::string& script, std::string& revision);
 bool show_url_dialog(std::string& url);
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics);
+void show_download_complete(const std::string& summary, const std::string& folder);
 struct DownloadOptions { bool can_all_pages = false, all_pages = false, skip_failures = true, cleanup_duplicates = false; int workers = 3; };
 bool show_download_dialog(std::vector<std::string>& payloads, std::string& folder, std::string& quality,
     std::string& naming_template, DownloadOptions& options);

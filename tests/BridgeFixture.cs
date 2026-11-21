@@ -59,12 +59,26 @@ static class BridgeFixture
         }
         if (command == "source-options")
         {
-            Console.WriteLine("SOURCE\t11111111111111111111111111111111\t" + Encode("测试音源一") + "\t1");
+            Console.WriteLine("SOURCE\t11111111111111111111111111111111\t" + Encode("测试音源一") + "\t1\t" +
+                Encode("名称：测试音源一\n版本：v1\n作者：fixture\n支持站点：QQ音乐\n支持音质：\nQQ音乐（无损音质）\n描述：测试描述") +
+                "\t1\t" + new string('a', 64));
             Console.WriteLine("SITE\t11111111111111111111111111111111\tqq\t" + Encode("QQ音乐") + "\ttrack,album,artist,playlist");
             Console.WriteLine("SITE\t11111111111111111111111111111111\tqishui\t" + Encode("汽水音乐") + "\tunavailable");
-            Console.WriteLine("SOURCE\t22222222222222222222222222222222\t" + Encode("测试音源二") + "\t0");
+            Console.WriteLine("SOURCE\t22222222222222222222222222222222\t" + Encode("测试音源二") + "\t0\t" +
+                Encode("名称：测试音源二\n版本：v1\n作者：fixture\n支持站点：咪咕音乐\n支持音质：\n咪咕音乐（无损音质）") +
+                "\t0\t" + new string('b', 64));
             Console.WriteLine("SITE\t22222222222222222222222222222222\tmigu\t" + Encode("咪咕音乐") + "\ttrack");
         }
+        else if (command == "source-script")
+        {
+            Console.WriteLine("SCRIPT\t" + Encode("/* @name 测试音源 */\nlx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['flac']}}});") +
+                "\t" + new string('a', 64));
+        }
+        else if (command == "source-url")
+        {
+            Console.WriteLine("URL\t" + Encode("https://example.com/fixture-source?key=test"));
+        }
+        else if (command == "edit-source" || command == "update-source") Emit("OK", "音源操作完成（测试）");
         else if (command == "check-update") Emit("OK", "当前已是最新版本（测试）");
         else if (command == "search")
         {

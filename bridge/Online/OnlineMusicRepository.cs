@@ -84,6 +84,78 @@ namespace LxMusic.Bridge.Online
             }
         }
 
+        public void EditSource(string id, string revision, string script)
+        {
+            if (string.IsNullOrWhiteSpace(script) || script.IndexOf('\0') >= 0)
+                throw new InvalidOperationException("音源脚本为空或含有无效字符");
+            if (Encoding.UTF8.GetByteCount(script) > 2 * 1024 * 1024)
+                throw new InvalidOperationException("音源脚本不能超过 2 MB");
+            if (OnlineSourceStore.Revision(Sources.Find(id)) != revision)
+                throw new InvalidOperationException("音源已被其他操作修改，请重新打开后编辑；本次内容已保留");
+            var descriptor = ValidateScript(script);
+            Sources.ReplaceScript(id, revision, script, descriptor);
+            ResetRuntimeOnly();
+        }
+
+        public SourceUpdateResult UpdateSource(string id, string revision)
+        {
+            var source = Sources.Find(id);
+            if (OnlineSourceStore.Revision(source) != revision)
+                throw new InvalidOperationException("音源已被其他操作修改，请重新打开后再更新");
+            SourceUpdateNotice notice = null;
+            try
+            {
+                using (var runtime = LxSourceRuntime.Create(source.Script, BuildRuntimeKey(source.Script), TimeSpan.FromSeconds(25)))
+                {
+                    if (runtime.UpdateChecked.Wait(TimeSpan.FromSeconds(12))) notice = runtime.UpdateChecked.Result;
+                }
+            }
+            catch
+            {
+                throw new InvalidOperationException("音源自检失败，请先编辑或重新导入；原音源未修改");
+            }
+
+            var candidates = new List<string>();
+            if (notice != null && !string.IsNullOrWhiteSpace(notice.Url)) candidates.Add(notice.Url);
+            else if (notice == null && !string.IsNullOrWhiteSpace(source.Url)) candidates.Add(source.Url);
+            foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var response = OnlineHttp.Execute(candidate, maxBytes: 2 * 1024 * 1024, useSystemProxy: true);
+                    if (!response.Ok) continue;
+                    var script = response.Body.TrimStart('\uFEFF');
+                    if (script.Length < 32) continue;
+                    var descriptor = ValidateScript(script);
+                    Sources.ReplaceScript(id, revision, script, descriptor);
+                    ResetRuntimeOnly();
+                    return new SourceUpdateResult { Descriptor = descriptor };
+                }
+                catch
+                {
+                    // A source may return a human-facing update page. Keep the
+                    // alert and let the UI offer to open it.
+                }
+            }
+            if (notice != null) return new SourceUpdateResult { Notice = notice };
+            throw new InvalidOperationException("没有发现可下载的新版音源");
+        }
+
+        private static LxSourceDescriptor ValidateScript(string script)
+        {
+            try
+            {
+                using (var runtime = LxSourceRuntime.Create(script, BuildRuntimeKey(script), TimeSpan.FromSeconds(25)))
+                    return runtime.Descriptor;
+            }
+            catch
+            {
+                // Runtime errors can echo script text such as cookies. Do not
+                // expose them through the bridge when validating private code.
+                throw new InvalidOperationException("脚本校验或初始化失败，请检查语法和网络；原音源未修改");
+            }
+        }
+
         private static string BuildRuntimeKey(string script)
         {
             var hash = 17;

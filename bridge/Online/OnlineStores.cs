@@ -101,16 +101,57 @@ namespace LxMusic.Bridge.Online
             lock (_sync) { Load(); return _sources.Select(Describe).ToArray(); }
         }
 
-        private static OnlineSourceState Describe(StoredOnlineSource stored) => new OnlineSourceState
+        public StoredOnlineSource Find(string id)
         {
-            Id = stored.Id,
-            Name = string.IsNullOrWhiteSpace(stored.DisplayName)
-                ? (string.IsNullOrWhiteSpace(stored.Descriptor?.Name) ? "已导入在线音源" : stored.Descriptor.Name)
-                : stored.DisplayName,
-            Version = stored.Descriptor?.Version ?? string.Empty,
-            Host = SafeHost(stored.Url), Imported = true,
-            Descriptor = stored.Descriptor ?? new LxSourceDescriptor()
-        };
+            lock (_sync)
+            {
+                Load();
+                var source = _sources.FirstOrDefault(item => item.Id == id);
+                if (source == null) throw new InvalidOperationException("音源不存在，请重新打开音源列表");
+                return JsonConvert.DeserializeObject<StoredOnlineSource>(JsonConvert.SerializeObject(source));
+            }
+        }
+
+        public static string Revision(StoredOnlineSource source)
+        {
+            using (var hash = SHA256.Create())
+            {
+                var data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(source));
+                return BitConverter.ToString(hash.ComputeHash(data)).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        public void ReplaceScript(string id, string revision, string script, LxSourceDescriptor descriptor)
+        {
+            Mutate(() =>
+            {
+                var source = _sources.FirstOrDefault(item => item.Id == id);
+                if (source == null) throw new InvalidOperationException("音源已删除，无法保存；编辑内容已保留");
+                if (Revision(source) != revision)
+                    throw new InvalidOperationException("音源已被其他操作修改，请重新打开后编辑；本次内容已保留");
+                source.Script = script;
+                source.Descriptor = descriptor;
+            });
+        }
+
+        private static OnlineSourceState Describe(StoredOnlineSource stored)
+        {
+            var descriptor = JsonConvert.DeserializeObject<LxSourceDescriptor>(
+                JsonConvert.SerializeObject(stored.Descriptor ?? new LxSourceDescriptor()));
+            SourceMetadata.Complete(descriptor, stored.Script);
+            return new OnlineSourceState
+            {
+                Id = stored.Id,
+                Name = !string.IsNullOrWhiteSpace(descriptor.Name) && descriptor.Name != "LX 在线音源"
+                    ? descriptor.Name
+                    : string.IsNullOrWhiteSpace(stored.DisplayName) ? "已导入在线音源" : stored.DisplayName,
+                Version = descriptor.Version,
+                Host = SafeHost(stored.Url),
+                UrlAvailable = !string.IsNullOrWhiteSpace(stored.Url),
+                Imported = true,
+                Descriptor = descriptor
+            };
+        }
 
         public void Save(string url, string script, LxSourceDescriptor descriptor, string displayName, string origin = null)
         {

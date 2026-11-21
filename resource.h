@@ -7,6 +7,8 @@
 #define IDD_LX_SOURCES            105
 #define IDD_LX_PAGE               106
 #define IDD_LX_PREFERENCES        107
+#define IDD_LX_SOURCE_EDITOR      108
+#define IDD_LX_DOWNLOAD_DONE      109
 #define IDC_LX_SOURCE             1101
 #define IDC_LX_SOURCE_LIST        1102
 #define IDC_LX_IMPORT_FILE        1103
@@ -14,6 +16,10 @@
 #define IDC_LX_REMOVE_SOURCE      1105
 #define IDC_LX_SELECT_SOURCE      1106
 #define IDC_LX_PAGE_NUMBER        1107
+#define IDC_LX_EDIT_SOURCE        1108
+#define IDC_LX_UPDATE_SOURCE      1109
+#define IDC_LX_COPY_SOURCE_URL    1110
+#define IDC_LX_SOURCE_DETAILS     1111
 
 #define IDC_LX_KEYWORD            1001
 #define IDC_LX_SITE               1002
@@ -46,6 +52,9 @@
 #define IDC_LX_NAMING_HINT        1029
 #define IDC_LX_PREVIEW_LABEL      1030
 #define IDC_LX_CLEANUP_HINT       1031
+#define IDC_LX_EDITOR_TEXT        1032
+#define IDC_LX_DOWNLOAD_DONE_TEXT 1033
+#define IDC_LX_OPEN_DOWNLOAD_DIR  1034
 
 #ifndef IDC_STATIC
 #define IDC_STATIC -1

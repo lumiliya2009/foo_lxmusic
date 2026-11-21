@@ -242,8 +242,12 @@ public:
     SourceAction action = SourceAction::close;
     BEGIN_MSG_MAP(source_manager_dialog)
         MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_HANDLER(IDC_LX_SOURCE_LIST, LBN_SELCHANGE, OnSelectionChanged)
         COMMAND_ID_HANDLER(IDC_LX_IMPORT_FILE, OnAction)
         COMMAND_ID_HANDLER(IDC_LX_IMPORT_URL, OnAction)
+        COMMAND_ID_HANDLER(IDC_LX_EDIT_SOURCE, OnAction)
+        COMMAND_ID_HANDLER(IDC_LX_UPDATE_SOURCE, OnAction)
+        COMMAND_ID_HANDLER(IDC_LX_COPY_SOURCE_URL, OnAction)
         COMMAND_ID_HANDLER(IDC_LX_REMOVE_SOURCE, OnAction)
         COMMAND_ID_HANDLER(IDC_LX_SELECT_SOURCE, OnAction)
         COMMAND_ID_HANDLER(IDCANCEL, OnAction)
@@ -258,21 +262,96 @@ public:
             if (sources[i].active) current = static_cast<int>(i);
         }
         list.SetCurSel(current);
-        GetDlgItem(IDC_LX_REMOVE_SOURCE).EnableWindow(!sources.empty());
-        GetDlgItem(IDC_LX_SELECT_SOURCE).EnableWindow(!sources.empty());
+        UpdateDetails();
         return TRUE;
     }
+    const SourceOption* SelectedSource() const {
+        const int index = CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).GetCurSel();
+        return index >= 0 && static_cast<size_t>(index) < sources.size() ? &sources[index] : nullptr;
+    }
+    void UpdateDetails() {
+        const auto source = SelectedSource();
+        uSetDlgItemText(*this, IDC_LX_SOURCE_DETAILS, source ? source->details.c_str() : "尚未导入音源。");
+        const BOOL available = source ? TRUE : FALSE;
+        for (const auto id : { IDC_LX_REMOVE_SOURCE, IDC_LX_SELECT_SOURCE, IDC_LX_EDIT_SOURCE,
+            IDC_LX_UPDATE_SOURCE, IDC_LX_COPY_SOURCE_URL }) GetDlgItem(id).EnableWindow(available);
+        if (source) {
+            GetDlgItem(IDC_LX_COPY_SOURCE_URL).EnableWindow(source->url_available ? TRUE : FALSE);
+        }
+    }
+    LRESULT OnSelectionChanged(WORD, WORD, HWND, BOOL&) { UpdateDetails(); return 0; }
     LRESULT OnAction(WORD, WORD id, HWND, BOOL&) {
         if (id == IDC_LX_IMPORT_FILE) action = SourceAction::import_file;
         else if (id == IDC_LX_IMPORT_URL) action = SourceAction::import_url;
-        else if (id == IDC_LX_REMOVE_SOURCE || id == IDC_LX_SELECT_SOURCE) {
-            const int i = CListBox(GetDlgItem(IDC_LX_SOURCE_LIST)).GetCurSel();
-            if (i < 0 || static_cast<size_t>(i) >= sources.size()) return 0;
-            selected = sources[i].id;
-            action = id == IDC_LX_SELECT_SOURCE ? SourceAction::select : SourceAction::remove;
+        else if (id == IDC_LX_REMOVE_SOURCE || id == IDC_LX_SELECT_SOURCE || id == IDC_LX_EDIT_SOURCE ||
+            id == IDC_LX_UPDATE_SOURCE || id == IDC_LX_COPY_SOURCE_URL) {
+            const auto source = SelectedSource();
+            if (!source) return 0;
+            selected = source->id;
+            action = id == IDC_LX_SELECT_SOURCE ? SourceAction::select :
+                id == IDC_LX_REMOVE_SOURCE ? SourceAction::remove :
+                id == IDC_LX_EDIT_SOURCE ? SourceAction::edit :
+                id == IDC_LX_UPDATE_SOURCE ? SourceAction::update : SourceAction::copy_url;
         }
         EndDialog(IDOK); return 0;
     }
+};
+
+class source_editor_dialog : public CDialogImpl<source_editor_dialog> {
+public:
+    enum { IDD = IDD_LX_SOURCE_EDITOR };
+    std::string title, script, revision;
+    BEGIN_MSG_MAP(source_editor_dialog)
+        MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_ID_HANDLER(IDOK, OnOK)
+        COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
+    END_MSG_MAP()
+    BOOL OnInitDialog(CWindow, LPARAM) {
+        SetWindowText(pfc::stringcvt::string_wide_from_utf8(title.c_str()));
+        auto editor = GetDlgItem(IDC_LX_EDITOR_TEXT);
+        editor.SendMessage(EM_SETLIMITTEXT, 2 * 1024 * 1024, 0);
+        editor.SetWindowText(pfc::stringcvt::string_wide_from_utf8(script.c_str()));
+        editor.SetFocus();
+        return FALSE;
+    }
+    LRESULT OnOK(WORD, WORD, HWND, BOOL&) {
+        pfc::string8 value;
+        uGetDlgItemText(*this, IDC_LX_EDITOR_TEXT, value);
+        script = value.c_str();
+        if (script.empty()) {
+            MessageBoxW(L"音源脚本不能为空。", L"编辑 LX 音源", MB_OK | MB_ICONINFORMATION);
+            return 0;
+        }
+        EndDialog(IDOK);
+        return 0;
+    }
+    LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
+};
+
+class download_done_dialog : public CDialogImpl<download_done_dialog> {
+public:
+    enum { IDD = IDD_LX_DOWNLOAD_DONE };
+    std::string summary, folder;
+    BEGIN_MSG_MAP(download_done_dialog)
+        MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_ID_HANDLER(IDC_LX_OPEN_DOWNLOAD_DIR, OnOpen)
+        COMMAND_ID_HANDLER(IDCANCEL, OnClose)
+    END_MSG_MAP()
+    BOOL OnInitDialog(CWindow, LPARAM) {
+        CenterWindow(GetParent());
+        uSetDlgItemText(*this, IDC_LX_DOWNLOAD_DONE_TEXT, summary.c_str());
+        GetDlgItem(IDC_LX_OPEN_DOWNLOAD_DIR).EnableWindow(folder.empty() ? FALSE : TRUE);
+        return TRUE;
+    }
+    LRESULT OnOpen(WORD, WORD, HWND, BOOL&) {
+        if (!folder.empty()) {
+            const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(*this, L"open",
+                pfc::stringcvt::string_wide_from_utf8(folder.c_str()), nullptr, nullptr, SW_SHOWNORMAL));
+            if (result <= 32) MessageBoxW(L"无法打开下载文件夹。", L"LX 批量下载", MB_OK | MB_ICONINFORMATION);
+        }
+        return 0;
+    }
+    LRESULT OnClose(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
 };
 
 class url_dialog : public CDialogImpl<url_dialog> {
@@ -722,6 +801,17 @@ SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::
     return dialog.action;
 }
 
+bool show_source_editor(const std::string& title, std::string& script, std::string& revision) {
+    source_editor_dialog dialog;
+    dialog.title = title;
+    dialog.script = script;
+    dialog.revision = revision;
+    if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
+    script = dialog.script;
+    revision = dialog.revision;
+    return true;
+}
+
 bool show_url_dialog(std::string& url) {
     url_dialog dialog;
     if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
@@ -731,6 +821,13 @@ bool show_url_dialog(std::string& url) {
 
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics) {
     lyrics_dialog dialog(caption, lyrics);
+    dialog.DoModal(core_api::get_main_window());
+}
+
+void show_download_complete(const std::string& summary, const std::string& folder) {
+    download_done_dialog dialog;
+    dialog.summary = summary;
+    dialog.folder = folder;
     dialog.DoModal(core_api::get_main_window());
 }
 
