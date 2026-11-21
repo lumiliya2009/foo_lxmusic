@@ -345,10 +345,10 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qu
         {
             var path = Path.Combine(profile, "paid-source.js");
             var script = @"/**
- * @name ikun音源[赞助][年卡]
+ * @name 测试赞助音源[年卡]
  * @version v27
- * @author ikunshare
- * @description QQ群329970458
+ * @author fixture-author
+ * @description 测试更新说明
  * 过期时间：2027-01-01
  */
 const savedCookie = 'COOKIE_ORIGINAL';
@@ -360,7 +360,7 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qu
             var row = Bridge("source-options").Lines.Single(line => line[0] == "SOURCE");
             Check(row.Length >= 7, "source metadata/revision was not exported");
             var details = Decode(row[4]);
-            Check(details.Contains("ikun音源[赞助][年卡]") && details.Contains("作者：ikunshare") &&
+            Check(details.Contains("测试赞助音源[年卡]") && details.Contains("作者：fixture-author") &&
                 details.Contains("标准音质") && details.Contains("母带音质") && details.Contains("过期时间：2027-01-01"),
                 "source description or quality details lost: " + details);
             Check(row[5] == "0", "local source advertised a network address");
