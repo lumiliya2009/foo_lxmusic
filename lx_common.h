@@ -4,7 +4,7 @@ namespace lxmusic {
 
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 constexpr const char* kSchemeSuffix = ".lxmusic";
-constexpr const char* kVersion = "0.1.13";
+constexpr const char* kVersion = "0.1.11";
 
 enum PayloadField : size_t {
     pf_version = 0,

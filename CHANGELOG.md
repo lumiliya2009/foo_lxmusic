@@ -1,11 +1,5 @@
 # Changelog
 
-## 0.1.13
-
-- Ask for confirmation before replacing a source during an update check, and show the result in a dialog.
-- Move source actions into the source-list context menu for a simpler layout.
-- Download component updates from jsDelivr mirrors first and GitHub as the final fallback.
-
 ## 0.1.11
 
 - Edit imported source scripts directly, including configured cookies.
@@ -15,6 +9,9 @@
 - Copy the address of a source imported from a URL.
 - Use status messages for update checks and direct-link copies.
 - Add open-folder and close buttons to the download completion dialog.
+- Ask for confirmation before source updates and show the result in a dialog.
+- Move source actions into the source-list context menu.
+- Download future component updates from jsDelivr mirrors first and GitHub as the final fallback.
 
 ## 0.1.10
 

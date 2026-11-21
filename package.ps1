@@ -9,7 +9,7 @@ $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $distDir = Join-Path $projectRoot 'dist'
 $bridgeProject = Join-Path $projectRoot 'bridge\foo_lx_bridge.csproj'
 $bridgeOutput = Join-Path $projectRoot 'bridge\bin\Release\net48'
-$version = '0.1.13'
+$version = '0.1.11'
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path -LiteralPath $vswhere)) { throw '找不到 Visual Studio Installer (vswhere.exe)' }
