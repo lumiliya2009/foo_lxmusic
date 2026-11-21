@@ -1181,22 +1181,25 @@ static const GUID guid_page_previous = { 0x85d64b4a, 0xc949, 0x409d,{ 0xa6, 0x8a
 static const GUID guid_page_next = { 0x85d64b4b, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 static const GUID guid_page_last = { 0x85d64b4c, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 static const GUID guid_page_jump = { 0x85d64b4d, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_release_page = { 0x85d64b4e, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 static mainmenu_group_popup_factory g_main_group(guid_main_group, mainmenu_groups::file,
     mainmenu_commands::sort_priority_dontcare, "LX 在线音乐");
 
 class main_commands : public mainmenu_commands {
 public:
-    enum { search, browse, page_previous, page_next, page_last, page_jump, manage, update, lyrics, back, settings, count };
+    enum { search, browse, page_previous, page_next, page_last, page_jump, manage, update, release_page, lyrics, back, settings, count };
     t_uint32 get_command_count() override { return count; }
     GUID get_command(t_uint32 index) override {
         static const GUID values[] = { guid_search, guid_browse, guid_page_previous, guid_page_next,
-            guid_page_last, guid_page_jump, guid_manage, guid_update, guid_lyrics_main, guid_back, guid_settings };
+            guid_page_last, guid_page_jump, guid_manage, guid_update, guid_release_page,
+            guid_lyrics_main, guid_back, guid_settings };
         return index < count ? values[index] : pfc::guid_null;
     }
     void get_name(t_uint32 index, pfc::string_base& out) override {
         static const char* values[] = { "搜索在线音乐…", "随便看看…", "上一页", "下一页",
-            "跳到尾页", "页数跳转…", "管理音源…", "检查更新", "获取所选歌曲歌词", "返回上一层", "设置…" };
+            "跳到尾页", "页数跳转…", "管理音源…", "检查更新", "发布页",
+            "获取所选歌曲歌词", "返回上一层", "设置…" };
         if (index < count) out = values[index];
     }
     bool get_description(t_uint32 index, pfc::string_base& out) override {
@@ -1205,6 +1208,7 @@ public:
         else if (index == page_next) out = "切换到当前 LX 搜索结果的下一页。可在快捷键设置中绑定按键。";
         else if (index == page_last) out = "切换到当前 LX 搜索结果能够访问的尾页。可在快捷键设置中绑定按键。";
         else if (index == page_jump) out = "输入页码并跳转当前 LX 搜索结果。可在快捷键设置中绑定按键。";
+        else if (index == release_page) out = "用默认浏览器打开 LX 在线音乐 GitHub 发布页。";
         else if (index == lyrics) out = "获取播放列表中所选歌曲的在线歌词；可在 foobar2000 键盘快捷键设置中绑定 Shift+Enter。";
         else if (index == back) out = "返回打开集合前的播放列表。默认退格键；在快捷键设置中绑定其他按键后，默认退格键自动停用。";
         else out = "LX 在线音乐搜索与音源管理。";
@@ -1221,6 +1225,12 @@ public:
         case page_jump: command_page_jump(); break;
         case manage: command_manage_sources(); break;
         case update: command_check_update(); break;
+        case release_page: {
+            const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(core_api::get_main_window(), L"open",
+                L"https://github.com/lumiliya2009/foo_lxmusic/releases", nullptr, nullptr, SW_SHOWNORMAL));
+            if (result <= 32) show_status("无法打开 GitHub 发布页");
+            break;
+        }
         case settings: show_component_preferences(); break;
         case back: command_back(); break;
         case lyrics: { auto items = selected_playlist_items(); command_lyrics(items); break; }

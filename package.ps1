@@ -9,6 +9,17 @@ $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $distDir = Join-Path $projectRoot 'dist'
 $bridgeProject = Join-Path $projectRoot 'bridge\foo_lx_bridge.csproj'
 $bridgeOutput = Join-Path $projectRoot 'bridge\bin\Release\net48'
+$bridgePackageFiles = @(
+    'foo_lx_bridge.exe',
+    'foo_lx_bridge.exe.config',
+    'Acornima.dll',
+    'Jint.dll',
+    'Newtonsoft.Json.dll',
+    'System.Buffers.dll',
+    'System.Memory.dll',
+    'System.Numerics.Vectors.dll',
+    'System.Runtime.CompilerServices.Unsafe.dll'
+)
 $version = '0.1.12'
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -47,9 +58,11 @@ function New-ComponentPackage {
     New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
 
     Copy-Item -LiteralPath $DllPath -Destination (Join-Path $stageDir 'foo_lxmusic.dll')
-    Get-ChildItem -LiteralPath $bridgeOutput -File | Where-Object {
-        $_.Extension -in '.exe', '.dll', '.config'
-    } | Copy-Item -Destination $stageDir
+    foreach ($name in $bridgePackageFiles) {
+        $source = Join-Path $bridgeOutput $name
+        if (-not (Test-Path -LiteralPath $source)) { throw "桥接发布文件缺失：$name" }
+        Copy-Item -LiteralPath $source -Destination $stageDir
+    }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination (Join-Path $stageDir 'README.md')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE'), (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $stageDir
     Copy-Item -LiteralPath (Join-Path $projectRoot 'bridge\LICENSE') -Destination (Join-Path $stageDir 'BRIDGE-LICENSE.txt')
@@ -69,9 +82,9 @@ if ($InstallX86) {
     $targetDir = 'C:\Program Files (x86)\foobar2000\profile\user-components\foo_lxmusic'
     New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectRoot 'build\Win32\Release\foo_lxmusic.dll') -Destination $targetDir -Force
-    Get-ChildItem -LiteralPath $bridgeOutput -File | Where-Object {
-        $_.Extension -in '.exe', '.dll', '.config'
-    } | Copy-Item -Destination $targetDir -Force
+    foreach ($name in $bridgePackageFiles) {
+        Copy-Item -LiteralPath (Join-Path $bridgeOutput $name) -Destination $targetDir -Force
+    }
 }
 
 $x86Package, $x64Package | Select-Object FullName, Length, LastWriteTime
