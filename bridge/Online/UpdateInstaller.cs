@@ -117,8 +117,7 @@ namespace LxMusic.Bridge.Online
                 {
                     var name = Path.GetFileName(file);
                     if (name.Equals("foo_lx_bridge.exe", StringComparison.OrdinalIgnoreCase) ||
-                        name.Equals("foo_lx_bridge.exe.config", StringComparison.OrdinalIgnoreCase) ||
-                        name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                        name.Equals("foo_lx_bridge.exe.config", StringComparison.OrdinalIgnoreCase))
                         File.Copy(file, Path.Combine(runner, name));
                 }
                 var start = new ProcessStartInfo(Path.Combine(runner, "foo_lx_bridge.exe"), "apply-update")
