@@ -175,11 +175,11 @@ void run_task(const char* title, Worker worker, Done done, bool showItem = false
         fb2k::inMainThread([state, done, silentErrors] {
             try {
                 if (!state->error.empty()) {
-                    if (!silentErrors) popup_message::g_complain("LX 在线音乐操作失败", state->error.c_str());
+                    if (!silentErrors) show_message(state->error.c_str(), "LX 在线音乐操作失败", MB_ICONERROR);
                 }
                 else done(*state);
             } catch (const std::exception& ex) {
-                if (!silentErrors) popup_message::g_complain("LX 在线音乐操作失败", ex.what());
+                if (!silentErrors) show_message(ex.what(), "LX 在线音乐操作失败", MB_ICONERROR);
             } catch (...) {}
         });
     });
@@ -297,7 +297,7 @@ void start_bridge_message(const char* title, std::vector<std::string> args, std:
             if (next) { next(); return; }
             auto message = bridge_message(state.result);
             if (message.empty()) message = "操作完成";
-            show_status(message);
+            show_message(message);
         }, true);
 }
 
@@ -314,11 +314,11 @@ void save_source_edit(const std::string& id, const std::string& revision,
         }
         fb2k::inMainThread([state, id, revision, title, script] {
             if (state->error.empty()) {
-                show_status("音源已保存");
+                show_message("音源已保存");
                 command_manage_sources();
                 return;
             }
-            popup_message::g_complain("保存音源失败", state->error.c_str());
+            show_message(state->error.c_str(), "保存音源失败", MB_ICONERROR);
             std::string retry_script = script;
             std::string retry_revision = revision;
             if (show_source_editor(title + "（校验失败，内容已保留）", retry_script, retry_revision))
@@ -379,7 +379,6 @@ void update_source(const SourceOption& source) {
                             L"LX 音源更新", MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON1) == IDYES)
                             ShellExecuteW(core_api::get_main_window(), L"open",
                                 pfc::stringcvt::string_wide_from_utf8(url.c_str()), nullptr, nullptr, SW_SHOWNORMAL);
-                        else show_status("音源有可用更新");
                     } else {
                         MessageBoxW(core_api::get_main_window(), pfc::stringcvt::string_wide_from_utf8(message.c_str()),
                             L"LX 音源更新", MB_OK | MB_ICONINFORMATION);
@@ -626,7 +625,7 @@ void command_search() {
         [](async_state& state) {
             const auto sources = source_options(state.result);
             if (sources.empty()) {
-                popup_message::g_show("请先在“文件 → LX 在线音乐 → 管理音源”导入脚本。", "LX 在线音乐");
+                show_message("请先在“文件 → LX 在线音乐 → 管理音源”导入脚本。", "LX 在线音乐");
                 return;
             }
             SearchOptions options;
@@ -652,7 +651,8 @@ void command_browse() {
                 });
             });
             if (!available) {
-                popup_message::g_show("当前音源没有可用于随便看看的站点。", "LX 在线音乐");
+                show_message(sources.empty() ? "当前音源没有可用于随便看看的站点。请先在“文件 → LX 在线音乐 → 管理音源”导入脚本。" :
+                    "当前音源没有可用于随便看看的站点，请在管理音源中选择或导入支持浏览的音源。", "LX 在线音乐");
                 return;
             }
             SearchOptions options;
@@ -711,7 +711,7 @@ void command_search_page(t_size playlist, t_size item) {
                 mark_search_page(target, state.page);
                 if (state.page.options.type != "discover") remember_search(state.page.options);
             }, true);
-    } catch (const std::exception& ex) { popup_message::g_complain("搜索结果翻页失败", ex.what()); }
+    } catch (const std::exception& ex) { show_message(ex.what(), "搜索结果翻页失败", MB_ICONERROR); }
 }
 
 namespace {
@@ -749,12 +749,12 @@ void run_page_action(const std::string& action) {
     t_size playlist = pfc_infinite;
     SearchPage page;
     if (!active_search_page(playlist, page)) {
-        show_status("当前播放列表不是 LX 搜索结果");
+        show_message("当前播放列表不是 LX 搜索结果");
         return;
     }
     const auto row = find_page_action(playlist, action);
     if (row == pfc_infinite) {
-        show_status("当前页没有这个翻页操作");
+        show_message("当前页没有这个翻页操作");
         return;
     }
     command_search_page(playlist, row);
@@ -767,11 +767,11 @@ void command_page_previous() {
     t_size playlist;
     SearchPage page;
     if (!active_search_page(playlist, page)) {
-        show_status("当前播放列表不是 LX 搜索结果");
+        show_message("当前播放列表不是 LX 搜索结果");
         return;
     }
     if (page.page <= 1) {
-        show_status("已经是第一页");
+        show_message("已经是第一页");
         return;
     }
     run_page_action(std::to_string(page.page - 1));
@@ -782,11 +782,11 @@ void command_page_next() {
     t_size playlist;
     SearchPage page;
     if (!active_search_page(playlist, page)) {
-        show_status("当前播放列表不是 LX 搜索结果");
+        show_message("当前播放列表不是 LX 搜索结果");
         return;
     }
     if (!page.has_next) {
-        show_status("已经是最后一页");
+        show_message("已经是最后一页");
         return;
     }
     run_page_action(std::to_string(page.page + 1));
@@ -797,11 +797,11 @@ void command_page_last() {
     t_size playlist;
     SearchPage page;
     if (!active_search_page(playlist, page)) {
-        show_status("当前播放列表不是 LX 搜索结果");
+        show_message("当前播放列表不是 LX 搜索结果");
         return;
     }
     if (page.total_pages <= page.page) {
-        show_status("已经是最后一页");
+        show_message("已经是最后一页");
         return;
     }
     run_page_action("last");
@@ -864,7 +864,7 @@ void stop_update_checks() {
 void command_check_update(bool automatic) {
     if (g_updates_stopping || (automatic && !automatic_updates_enabled())) return;
     if (g_update_pending.exchange(true)) {
-        if (!automatic) show_status("正在检查或下载 LX 更新，请稍候");
+        if (!automatic) show_message("正在检查或下载 LX 更新，请稍候");
         return;
     }
     const auto pending = std::make_shared<update_guard>();
@@ -917,7 +917,7 @@ void command_check_update(bool automatic) {
                         [download, pending](threaded_process_callback::ctx_t, bool aborted) {
                             if (aborted) return;
                             if (!download->error.empty()) {
-                                popup_message::g_complain("LX 组件更新失败", download->error.c_str());
+                                show_message(download->error.c_str(), "LX 组件更新失败", MB_ICONERROR);
                                 return;
                             }
                             for (const auto& record : download->result.lines) {
@@ -927,11 +927,11 @@ void command_check_update(bool automatic) {
                                     const auto marker = CreateFileW(pfc::stringcvt::string_wide_from_utf8(cancel.c_str()),
                                         GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
                                     if (marker != INVALID_HANDLE_VALUE) CloseHandle(marker);
-                                    popup_message::g_complain("LX 组件更新失败", "无法退出播放器，本次更新未安装");
+                                    show_message("无法退出播放器，本次更新未安装", "LX 组件更新失败", MB_ICONERROR);
                                 }
                                 return;
                             }
-                            popup_message::g_complain("LX 组件更新失败", "更新助手未就绪，原版本未改动");
+                            show_message("更新助手未就绪，原版本未改动", "LX 组件更新失败", MB_ICONERROR);
                         });
                     threaded_process::g_run_modal(task,
                         threaded_process::flag_show_abort | threaded_process::flag_show_progress |
@@ -968,7 +968,7 @@ void command_copy_link(metadb_handle_list_cref items) {
                 url.size() > 65536 || url.find('\0') != std::string::npos)
                 throw std::runtime_error("音源未返回有效的播放直链");
             copy_text_to_clipboard(url);
-            show_status("已复制播放直链");
+            show_message("已复制播放直链");
         });
 }
 
@@ -997,7 +997,7 @@ void command_source_status() {
 
 void command_lyrics(metadb_handle_list_cref items) {
     if (items.get_count() == 0) {
-        popup_message::g_show("请先在播放列表中选择一首歌曲。", "LX 在线歌词");
+        show_message("请先在播放列表中选择一首歌曲。", "LX 在线歌词");
         return;
     }
     std::string payload;
@@ -1006,7 +1006,7 @@ void command_lyrics(metadb_handle_list_cref items) {
         payload = lyric_payload_for_handle(items[0]);
         title = decode_payload(payload).get(pf_title);
     } catch (const std::exception& ex) {
-        popup_message::g_complain("无法读取所选歌曲信息", ex);
+        show_message(ex.what(), "无法读取所选歌曲信息", MB_ICONERROR);
         return;
     }
     run_task("获取在线歌词",
@@ -1017,7 +1017,7 @@ void command_lyrics(metadb_handle_list_cref items) {
         [title](async_state& state) {
             const auto raw_lyrics = bridge_message(state.result, "LYRICS");
             if (raw_lyrics.empty()) {
-                popup_message::g_show("没有找到匹配的同步歌词。", "LX 在线歌词");
+                show_message("没有找到匹配的同步歌词。", "LX 在线歌词");
                 return;
             }
             show_lyrics_dialog("在线歌词 - " + title, strip_lrc_timestamps(raw_lyrics));
@@ -1037,7 +1037,7 @@ void command_expand(metadb_handle_list_cref items) {
         } catch (...) {}
     }
     if (requests.empty()) {
-        popup_message::g_show("请选择专辑、歌手或歌单搜索结果。", "LX 在线音乐");
+        show_message("请选择专辑、歌手或歌单搜索结果。", "LX 在线音乐");
         return;
     }
     const auto playlist = requests.size() == 1 ? "LX " + requests[0].title : "LX 展开结果";
@@ -1312,7 +1312,7 @@ public:
         case release_page: {
             const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(core_api::get_main_window(), L"open",
                 L"https://github.com/lumiliya2009/foo_lxmusic/releases", nullptr, nullptr, SW_SHOWNORMAL));
-            if (result <= 32) show_status("无法打开 GitHub 发布页");
+            if (result <= 32) show_message("无法打开 GitHub 发布页");
             break;
         }
         case settings: show_component_preferences(); break;

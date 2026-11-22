@@ -42,6 +42,7 @@ dotnet run --project ./tests/QualityRegression.csproj -c Release
 dotnet run --project ./tests/UpdateRegression.csproj -c Release
 ./tests/run-input-regression.ps1 -Platform Win32
 ./tests/run-input-regression.ps1 -Platform x64
+./tests/run-message-regression.ps1 -Platform x64
 ```
 
 测试覆盖音质回退、采样率等播放信息、播放失败和取消、错误 MIME 类型、专辑分页、封面回退、下载中断以及文件保留。可选联网验证及宿主 UI 检查见 `tests/README.md`。反馈问题时请提供 foobar2000 版本、组件版本、平台和错误提示，勿附带音源订阅地址、账号 Cookie 或带凭据的播放链接。

@@ -122,26 +122,26 @@ public:
             m_history.frames.pop_back();
             Render();
         } else if (m_history.origin && restore_navigation_origin(m_history.origin)) DestroyWindow();
-        else { Status("已经是第一层"); RestoreFocus(); }
+        else { MessageBoxW(L"已经是第一层", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION); RestoreFocus(); }
     }
 
     void PageAction(const std::string& action) {
         if (m_abort) return;
-        if (!Current().search) { Status("当前列表没有翻页操作"); return; }
+        if (!Current().search) { MessageBoxW(L"当前列表没有翻页操作", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION); return; }
         const auto page = Current().page;
         auto id = action;
         if (action == "previous") {
-            if (page.page <= 1) { Status("已经是第一页"); return; }
+            if (page.page <= 1) { MessageBoxW(L"已经是第一页", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION); return; }
             id = std::to_string(page.page - 1);
         } else if (action == "next") {
-            if (!page.has_next) { Status("已经是最后一页"); return; }
+            if (!page.has_next) { MessageBoxW(L"已经是最后一页", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION); return; }
             id = std::to_string(page.page + 1);
         }
         for (const auto& encoded : Current().items) {
             const auto payload = decode_payload(encoded);
             if (payload.is_navigation() && payload.get(pf_id) == id) { Navigate(payload); return; }
         }
-        Status("当前页没有这个翻页操作");
+        MessageBoxW(L"当前页没有这个翻页操作", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
     }
 
 private:

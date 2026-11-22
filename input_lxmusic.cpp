@@ -259,7 +259,7 @@ private:
         // suppresses stale errors after the user stops or starts another song.
         fb2k::inMainThread([message] {
             playback_control::get()->stop();
-            popup_message::g_complain("LX 播放失败", message.c_str());
+            lxmusic::show_message(message, "LX 播放失败", MB_ICONERROR);
         }, abort);
         abort.sleep(-1);
         throw exception_aborted();
