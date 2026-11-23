@@ -16,6 +16,33 @@ namespace LxMusic.Bridge.Online
     // Runs from a private staging directory after foobar2000 releases its DLLs.
     public static class UpdateInstaller
     {
+        private const string RollbackMarker = "rollback-failed: ";
+
+        // Remove finished update stages. Keep running ones and failed rollbacks the user may restore from.
+        public static void CleanupStages(string updatesDirectory)
+        {
+            try
+            {
+                if (!Directory.Exists(updatesDirectory)) return;
+                foreach (var stage in Directory.GetDirectories(updatesDirectory))
+                {
+                    try
+                    {
+                        var result = Path.Combine(stage, "result.txt");
+                        var finished = File.Exists(result)
+                            ? !File.ReadAllText(result).StartsWith(RollbackMarker, StringComparison.Ordinal)
+                            : Directory.GetLastWriteTimeUtc(stage) < DateTime.UtcNow.AddDays(-1);
+                        if (!finished) continue;
+                        // The runner stays locked until the helper exits; delete it first so a busy stage keeps its result.
+                        var runner = Path.Combine(stage, "runner");
+                        if (Directory.Exists(runner)) Directory.Delete(runner, true);
+                        Directory.Delete(stage, true);
+                    }
+                    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+        }
         private sealed class RollbackException : IOException
         {
             public RollbackException(string message, Exception inner) : base(message, inner) { }
@@ -45,6 +72,8 @@ namespace LxMusic.Bridge.Online
         {
             UpdateChecker.ValidatePackage(update);
             var urls = UpdateChecker.PackageUrls(update);
+            string lastError = null;
+            var mismatches = 0;
             for (var index = 0; index < urls.Length; index++)
             {
                 var url = urls[index];
@@ -66,7 +95,7 @@ namespace LxMusic.Bridge.Online
                             var response = OnlineHttp.Execute(url, timeoutMs: 25000,
                                 maxBytes: UpdateChecker.MaxPackageBytes, useSystemProxy: true, forceDirect: direct,
                                 progress: progress);
-                            if (!response.Ok) continue;
+                            if (!response.Ok) { lastError = host + "：HTTP " + response.StatusCode; continue; }
                             bytes = response.BodyBytes;
                         }
                         status?.Invoke("正在校验更新安装包…");
@@ -76,11 +105,17 @@ namespace LxMusic.Bridge.Online
                             progress?.Invoke(bytes.LongLength, bytes.LongLength);
                             return bytes;
                         }
+                        mismatches++;
+                        lastError = host + "：文件大小或 SHA256 与发布信息不符";
                     }
-                    catch { }
+                    catch (Exception ex) { lastError = host + "：" + ex.Message; }
                 }
             }
-            throw new IOException("下载安装包或校验失败，请检查网络后重试，原版本未改动");
+            // A mismatch on any mirror points at the release metadata, not the network, so report it first.
+            var reason = mismatches > 0
+                ? "有 " + mismatches + " 次下载到的文件大小或 SHA256 与发布信息不符，可能是发布信息有误"
+                : lastError ?? "没有可用的下载节点";
+            throw new IOException("下载安装包或校验失败，原版本未改动。" + reason);
         }
 
         public static string PrepareDownloaded(ComponentUpdate update, byte[] bytes, string updatesDirectory,
@@ -377,7 +412,7 @@ namespace LxMusic.Bridge.Online
             }
             catch (Exception ex)
             {
-                try { File.WriteAllText(Path.Combine(stage, "result.txt"), ex.Message); } catch { }
+                try { File.WriteAllText(Path.Combine(stage, "result.txt"), (ex is RollbackException ? RollbackMarker : "") + ex.Message); } catch { }
                 if (ready && plan != null)
                 {
                     MessageBox.Show(installed ? "更新已安装，请手动启动 foobar2000。\n" + ex.Message : ex.Message,

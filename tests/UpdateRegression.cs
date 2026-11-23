@@ -22,6 +22,11 @@ static class UpdateRegression
         try { action(); } catch (Exception) { ++checks; return; }
         throw new Exception(reason);
     }
+    static string Failure(Action action)
+    {
+        try { action(); } catch (Exception ex) { return ex.Message; }
+        throw new Exception("failure expected");
+    }
     static string Fresh() { var path = Path.Combine(Root, Guid.NewGuid().ToString("N")); Directory.CreateDirectory(path); return path; }
     static string Hash(byte[] data) { using (var sha = SHA256.Create()) return "sha256:" + BitConverter.ToString(sha.ComputeHash(data)).Replace("-", "").ToLowerInvariant(); }
 
@@ -160,8 +165,10 @@ static class UpdateRegression
             packageUrls[3].StartsWith("https://gh-proxy.com/https://github.com/") &&
             packageUrls[4].StartsWith("https://fastly.jsdelivr.net/") && packageUrls[5].StartsWith("https://cdn.jsdelivr.net/") &&
             packageUrls[6].StartsWith("https://github.com/"), "package mirror order or repository path invalid");
-        Reject(() => UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => new byte[bytes.Length]), "corrupt fallback installed");
-        Reject(() => UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => { throw new IOException("offline"); }), "package outage accepted");
+        Check(Failure(() => UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => new byte[bytes.Length])).Contains("SHA256"),
+            "corrupt package failure hid the checksum cause");
+        Check(Failure(() => UpdateInstaller.DownloadPackage(Update(bytes), (url, direct) => { throw new IOException("offline"); })).Contains("offline"),
+            "package outage hid the network cause");
     }
 
     static void TestPackages()
@@ -273,10 +280,34 @@ while (!File.Exists(Path.Combine(root, ""exit""))) Thread.Sleep(50);
                     Check(File.ReadAllBytes(Path.Combine(target, "foo_lxmusic.dll")).SequenceEqual(
                         File.ReadAllBytes(Path.Combine(stage, "payload", "foo_lxmusic.dll"))), "helper did not install DLL");
                     Check(File.ReadAllText(Path.Combine(target, "user-data.txt")) == "keep user data", "helper changed user data");
+                    WaitFor(() => { UpdateInstaller.CleanupStages(Path.Combine(root, "updates")); return !Directory.Exists(stage); },
+                        "successful update stage was kept");
                 }
             }
             finally { File.WriteAllText(Path.Combine(root, "exit"), "exit"); parent.WaitForExit(5000); }
         }
+    }
+
+    static string Stage(string updates, string name, string result)
+    {
+        var stage = Path.Combine(updates, name);
+        Directory.CreateDirectory(Path.Combine(stage, "runner"));
+        File.WriteAllText(Path.Combine(stage, "runner", "foo_lx_bridge.exe"), "runner");
+        if (result != null) File.WriteAllText(Path.Combine(stage, "result.txt"), result);
+        return stage;
+    }
+
+    static void TestCleanup()
+    {
+        var updates = Path.Combine(Fresh(), "updates");
+        var done = Stage(updates, "done", "cancelled");
+        var rollback = Stage(updates, "rollback", "rollback-failed: backup");
+        var running = Stage(updates, "running", null);
+        var abandoned = Stage(updates, "abandoned", null);
+        Directory.SetLastWriteTimeUtc(abandoned, DateTime.UtcNow.AddDays(-2));
+        UpdateInstaller.CleanupStages(updates);
+        Check(!Directory.Exists(done) && !Directory.Exists(abandoned), "finished update stage was kept");
+        Check(Directory.Exists(rollback) && Directory.Exists(running), "running or failed-rollback stage was deleted");
     }
 
     static int Main(string[] args)
@@ -284,7 +315,7 @@ while (!File.Exists(Path.Combine(root, ""exit""))) Thread.Sleep(50);
         try
         {
             Directory.CreateDirectory(Root);
-            TestMetadata(); TestFallbacks(); TestPackages(); TestInstall(); TestHelper(false); TestHelper(true);
+            TestMetadata(); TestFallbacks(); TestPackages(); TestInstall(); TestCleanup(); TestHelper(false); TestHelper(true);
             if (args.Contains("--live") || args.Contains("--live-check-only"))
             {
                 var proxy = args.FirstOrDefault(arg => arg.StartsWith("--proxy=", StringComparison.Ordinal));
