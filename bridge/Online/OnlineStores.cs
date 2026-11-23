@@ -178,6 +178,13 @@ namespace LxMusic.Bridge.Online
 
         public void Select(string id)
         {
+            // Searches pass the chosen source on every page; rewrite the library only when it changes.
+            lock (_sync)
+            {
+                _loaded = false;
+                Load();
+                if (!string.IsNullOrEmpty(id) && _activeId == id) return;
+            }
             Mutate(() =>
             {
                 if (!_sources.Any(item => item.Id == id)) throw new InvalidOperationException("音源不存在，请重新打开音源列表");

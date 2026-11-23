@@ -106,12 +106,7 @@ Payload decode_payload(const std::string& encoded);
 std::string payload_to_uri(const std::string& encoded);
 bool uri_to_payload(const char* path, std::string& encoded, Payload* decoded = nullptr);
 void payload_to_info(const Payload& payload, file_info& info);
-std::string format_track_display_title(const Payload& payload, const std::string& naming_template,
-    size_t number = 1, size_t total = 1);
-std::string download_naming_template();
-bool apply_naming_to_search();
-void payload_to_info(const Payload& payload, file_info& info, size_t number, size_t total);
-void hint_payload_info(metadb_handle_ptr handle, const Payload& payload, size_t number = 1, size_t total = 1);
+void hint_payload_info(metadb_handle_ptr handle, const Payload& payload);
 void refresh_playlist_payload_info();
 void install_collection_actions(t_size playlist);
 

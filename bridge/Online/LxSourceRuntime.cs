@@ -46,6 +46,7 @@ namespace LxMusic.Bridge.Online
         private Engine _engine;
         private volatile bool _closed;
         private LxSourceDescriptor _descriptor;
+        private Dictionary<string, string> _metadata;
         private Exception _loadError;
 
         private LxSourceRuntime(string script, string key)
@@ -155,7 +156,7 @@ namespace LxMusic.Bridge.Online
 
         private string Metadata(string name, string fallback)
         {
-            var fields = SourceMetadata.Read(_script);
+            var fields = _metadata ?? (_metadata = SourceMetadata.Read(_script));
             var value = fields.TryGetValue(name, out var found) ? found : string.Empty;
             return string.IsNullOrWhiteSpace(value) ? fallback : value;
         }

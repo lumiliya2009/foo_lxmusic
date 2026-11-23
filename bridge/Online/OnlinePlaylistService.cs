@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace LxMusic.Bridge.Online
@@ -130,6 +132,7 @@ namespace LxMusic.Bridge.Online
             const int pageSize = 100;
             var result = new List<OnlineCollection>();
             var owner = ownerOverride;
+            string encryptedUin = null;
             var total = 0;
             for (var offset = 0; offset < 1000; offset += pageSize)
             {
@@ -160,6 +163,7 @@ namespace LxMusic.Bridge.Online
                     owner = data.Value<string>("hostname");
                     if (string.IsNullOrWhiteSpace(owner)) owner = data.Value<string>("nickname");
                 }
+                if (string.IsNullOrWhiteSpace(encryptedUin)) encryptedUin = data.Value<string>("encrypt_uin");
                 total = Math.Max(total, data.Value<int?>("totoal") ?? data.Value<int?>("total") ?? 0);
                 var list = data["disslist"] as JArray ?? data["cdlist"] as JArray ?? new JArray();
                 foreach (var item in list.OfType<JObject>())
@@ -168,6 +172,26 @@ namespace LxMusic.Bridge.Online
                     if (collection != null && result.All(c => c.Id != collection.Id)) result.Add(collection);
                 }
                 if (list.Count < pageSize) break;
+            }
+
+            if (!accountScoped)
+            {
+                // Best effort: the created list above is still useful if these musicu reads fail.
+                try
+                {
+                    var liked = QqLikedSongs(string.IsNullOrWhiteSpace(encryptedUin) ? qqNumber : encryptedUin, owner);
+                    if (liked != null) result.Insert(0, liked);
+                }
+                catch (Exception) { }
+                if (!string.IsNullOrWhiteSpace(encryptedUin))
+                {
+                    try
+                    {
+                        foreach (var favorite in QqFavoritePlaylists(encryptedUin))
+                            if (result.All(c => c.Id != favorite.Id)) result.Add(favorite);
+                    }
+                    catch (Exception) { }
+                }
             }
 
             if (result.Count > 0) return result;
@@ -191,13 +215,8 @@ namespace LxMusic.Bridge.Online
             if (string.IsNullOrWhiteSpace(title)) title = TextUtil.HtmlDecode(item.Value<string>("dissname"));
             if (string.IsNullOrWhiteSpace(title)) title = TextUtil.HtmlDecode(item.Value<string>("name"));
             if (string.IsNullOrWhiteSpace(rawId) || rawId == "0" || string.IsNullOrWhiteSpace(title)) return null;
-            var dirShow = item.Value<int?>("dir_show");
-            var dirId = item.Value<int?>("dirid");
-            // The liked-songs directory is marked hidden from profile cards,
-            // but remains publicly readable through its dissid.
-            var likedSongs = (dirId.HasValue && dirId.Value == 4) ||
-                string.Equals(title, "我喜欢", StringComparison.Ordinal);
-            if (dirShow.HasValue && dirShow.Value == 0 && !likedSongs) return null;
+            // dirid 4 is a legacy "我喜欢" with stale songs; the current one (dirid 201) comes from QqLikedSongs.
+            if (item.Value<int?>("dirid") == 4 || item.Value<int?>("dir_show") == 0) return null;
 
             var count = item.Value<int?>("song_cnt") ?? item.Value<int?>("songnum") ?? item.Value<int?>("song_count") ?? 0;
             var parts = new List<string>();
@@ -275,6 +294,85 @@ namespace LxMusic.Bridge.Online
             var root = OnlineMusicRepository.SafeParse(response.Body);
             if (root.Value<int?>("code") != 0) throw new InvalidOperationException("QQ音乐歌单读取失败");
             return (root["cdlist"] as JArray)?.OfType<JObject>().FirstOrDefault() ?? new JObject();
+        }
+
+        // Liked songs and favorited playlists, as read by QQMusicEasier (QQMusicRequestBuilder.GetFavSongJson /
+        // GetUserPlaylistFavJson). Both work anonymously through the unsigned musicu.fcg.
+        private static JObject QqMusicu(string module, string method, JObject param)
+        {
+            var body = new JObject
+            {
+                ["comm"] = new JObject { ["ct"] = 24, ["cv"] = 0 },
+                ["req"] = new JObject { ["module"] = module, ["method"] = method, ["param"] = param }
+            };
+            var headers = QqHeaders(string.Empty, "https://y.qq.com/");
+            headers["Content-Type"] = "application/json";
+            var response = OnlineHttp.Execute("https://u.y.qq.com/cgi-bin/musicu.fcg", "POST", headers,
+                Encoding.UTF8.GetBytes(body.ToString(Formatting.None)), maxBytes: 4 * 1024 * 1024);
+            if (!response.Ok) throw new InvalidOperationException("在线服务返回 HTTP " + response.StatusCode);
+            var root = OnlineMusicRepository.SafeParse(response.Body);
+            if (root.SelectToken("req.code")?.Value<int>() != 0) throw new InvalidOperationException("QQ音乐歌单读取失败");
+            return root.SelectToken("req.data") as JObject ?? new JObject();
+        }
+
+        private static OnlineCollection QqLikedSongs(string hostUin, string owner)
+        {
+            var data = QqMusicu("music.srfDissInfo.DissInfo", "CgiGetDiss", new JObject
+            {
+                ["disstid"] = 0, ["dirid"] = 201, ["song_begin"] = 0, ["song_num"] = 1, ["enc_host_uin"] = hostUin
+            });
+            var info = data["dirinfo"] as JObject;
+            var id = info?.Value<string>("id");
+            if (string.IsNullOrWhiteSpace(id) || id == "0") return null;
+            var count = data.Value<int?>("total_song_num") ?? info.Value<int?>("songnum") ?? 0;
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(owner)) parts.Add(owner);
+            if (count > 0) parts.Add(count + " 首");
+            return new OnlineCollection
+            {
+                Platform = OnlinePlatform.Qq,
+                Id = id,
+                Title = "我喜欢",
+                Subtitle = string.Join(" · ", parts),
+                ArtworkUrl = (info.Value<string>("picurl") ?? string.Empty).Replace("http://", "https://"),
+                Kind = OnlineCollectionKind.Playlist,
+                TrackCount = count
+            };
+        }
+
+        private static List<OnlineCollection> QqFavoritePlaylists(string encryptedUin)
+        {
+            const int pageSize = 30;
+            var result = new List<OnlineCollection>();
+            for (var offset = 0; offset < 1000; offset += pageSize)
+            {
+                var data = QqMusicu("music.musicasset.PlaylistFavRead", "CgiGetPlaylistFavInfo",
+                    new JObject { ["uin"] = encryptedUin, ["offset"] = offset, ["size"] = pageSize });
+                var list = data["v_list"] as JArray ?? new JArray();
+                foreach (var item in list.OfType<JObject>())
+                {
+                    var id = item.Value<string>("tid");
+                    var title = TextUtil.HtmlDecode(item.Value<string>("name"));
+                    if (string.IsNullOrWhiteSpace(id) || id == "0" || string.IsNullOrWhiteSpace(title)) continue;
+                    var count = item.Value<int?>("songnum") ?? 0;
+                    var parts = new List<string> { "收藏" };
+                    var creator = TextUtil.HtmlDecode(item.Value<string>("nickname"));
+                    if (!string.IsNullOrWhiteSpace(creator)) parts.Add(creator);
+                    if (count > 0) parts.Add(count + " 首");
+                    result.Add(new OnlineCollection
+                    {
+                        Platform = OnlinePlatform.Qq,
+                        Id = id,
+                        Title = title,
+                        Subtitle = string.Join(" · ", parts),
+                        ArtworkUrl = (item.Value<string>("logo") ?? string.Empty).Replace("http://", "https://"),
+                        Kind = OnlineCollectionKind.Playlist,
+                        TrackCount = count
+                    });
+                }
+                if (list.Count < pageSize || offset + pageSize >= (data.Value<int?>("total") ?? 0)) break;
+            }
+            return result;
         }
 
         private static Dictionary<string, string> QqHeaders(string cookie, string referer)
