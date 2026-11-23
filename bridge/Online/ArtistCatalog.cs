@@ -1,13 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace LxMusic.Bridge.Online
 {
-    internal static class ArtistCatalog
+    public static class ArtistCatalog
     {
-        internal static OnlineCollectionPage Search(OnlinePlatform platform, string query, int page, int limit)
+        public static OnlineCollectionPage Search(OnlinePlatform platform, string query, int page, int limit)
         {
             if (string.IsNullOrWhiteSpace(query)) throw new InvalidOperationException("请输入歌手名");
             if (ReferenceEquals(platform, OnlinePlatform.Qq)) return SearchQq(query, page, limit);
@@ -16,7 +18,7 @@ namespace LxMusic.Bridge.Online
             throw new InvalidOperationException("该站点暂不支持歌手搜索");
         }
 
-        internal static OnlineSearchPage Tracks(OnlineCollection artist, int page, int limit)
+        public static OnlineSearchPage Tracks(OnlineCollection artist, int page, int limit)
         {
             if (ReferenceEquals(artist.Platform, OnlinePlatform.Qq)) return QqTracks(artist, page, limit);
             if (ReferenceEquals(artist.Platform, OnlinePlatform.Netease)) return NeteaseTracks(artist, page, limit);
@@ -72,7 +74,8 @@ namespace LxMusic.Bridge.Online
                 ["keyword"] = query, ["page"] = Math.Max(1, page), ["pagesize"] = Math.Max(1, Math.Min(50, limit)),
                 ["showtype"] = 10, ["version"] = 7910
             }), "https://www.kugou.com/");
-            var list = root.SelectToken("data.info") as JArray ?? new JArray();
+            // The singer search now returns the list directly in "data"; older responses used "data.info".
+            var list = root["data"] as JArray ?? root.SelectToken("data.info") as JArray ?? new JArray();
             var collections = list.OfType<JObject>().Select(item =>
             {
                 var id = Value(item, "singerid", "singer_id", "id");
@@ -88,20 +91,30 @@ namespace LxMusic.Bridge.Online
 
         private static OnlineSearchPage QqTracks(OnlineCollection artist, int page, int limit)
         {
-            var root = Json(OnlineHttp.Query("https://c.y.qq.com/v8/fcg-bin/fcg_v8_singer_track_cp.fcg", new Dictionary<string, object>
+            // fcg_v8_singer_track_cp.fcg now returns 404; musicu's GetSingerSongList (order 1 = most played) replaces it.
+            var root = Json("https://u.y.qq.com/cgi-bin/musicu.fcg", "https://y.qq.com/", new JObject
             {
-                ["singermid"] = artist.Id, ["begin"] = (Math.Max(1, page) - 1) * limit,
-                ["num"] = Math.Max(1, Math.Min(100, limit)), ["order"] = "listen", ["format"] = "json"
-            }), "https://y.qq.com/");
-            var list = root.SelectToken("data.list") as JArray ?? new JArray();
+                ["comm"] = new JObject { ["ct"] = 24, ["cv"] = 0 },
+                ["req"] = new JObject
+                {
+                    ["module"] = "musichall.song_list_server", ["method"] = "GetSingerSongList",
+                    ["param"] = new JObject
+                    {
+                        ["singerMid"] = artist.Id, ["order"] = 1, ["begin"] = (Math.Max(1, page) - 1) * limit,
+                        ["num"] = Math.Max(1, Math.Min(100, limit))
+                    }
+                }
+            });
+            if (root.SelectToken("req.code")?.Value<int>() != 0) throw new InvalidOperationException("QQ音乐歌手歌曲读取失败");
+            var list = root.SelectToken("req.data.songList") as JArray ?? new JArray();
             var tracks = new List<OnlineTrack>();
             foreach (var token in list.OfType<JObject>())
             {
-                var item = token["musicData"] as JObject ?? token;
+                var item = token["songInfo"] as JObject ?? token;
                 var track = OnlineMusicRepository.ParseQqTrack(item);
                 if (track != null) tracks.Add(track);
             }
-            var total = root.SelectToken("data.total")?.Value<int>() ?? tracks.Count;
+            var total = root.SelectToken("req.data.totalNum")?.Value<int>() ?? tracks.Count;
             return Page(tracks, page, limit, total);
         }
 
@@ -115,7 +128,7 @@ namespace LxMusic.Bridge.Online
 
         private static OnlineSearchPage KugouTracks(OnlineCollection artist, int page, int limit)
         {
-            var root = Json(OnlineHttp.Query("https://msearchretry.kugou.com/api/v3/singer/song", new Dictionary<string, object>
+            var root = Json(OnlineHttp.Query("https://mobiles.kugou.com/api/v3/singer/song", new Dictionary<string, object>
             {
                 ["singerid"] = artist.Id, ["page"] = Math.Max(1, page), ["pagesize"] = Math.Max(1, Math.Min(100, limit)),
                 ["sorttype"] = 2, ["version"] = 9108
@@ -137,12 +150,12 @@ namespace LxMusic.Bridge.Online
             new OnlineSearchPage { Tracks = tracks, Page = Math.Max(1, page), Total = total,
                 HasNext = (long)Math.Max(1, page) * limit < total };
 
-        private static JObject Json(string url, string referer)
+        private static JObject Json(string url, string referer, JObject body = null)
         {
-            var response = OnlineHttp.Execute(url, headers: new Dictionary<string, string>
-            {
-                ["User-Agent"] = OnlineHttp.BrowserUserAgent, ["Referer"] = referer
-            }, maxBytes: 8 * 1024 * 1024);
+            var headers = new Dictionary<string, string> { ["User-Agent"] = OnlineHttp.BrowserUserAgent, ["Referer"] = referer };
+            if (body != null) headers["Content-Type"] = "application/json";
+            var response = OnlineHttp.Execute(url, body == null ? "GET" : "POST", headers,
+                body == null ? null : Encoding.UTF8.GetBytes(body.ToString(Formatting.None)), maxBytes: 8 * 1024 * 1024);
             if (!response.Ok) throw new InvalidOperationException("在线服务返回 HTTP " + response.StatusCode);
             return JObject.Parse(response.Body.TrimStart('\uFEFF'));
         }

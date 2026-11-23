@@ -19,7 +19,6 @@ cfg_bool g_download_cleanup({ 0x628a3daa, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x
 cfg_int g_download_workers({ 0x628a3dab, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, 3);
 cfg_bool g_download_overrides({ 0x628a3dac, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
 cfg_bool g_auto_updates({ 0x628a3dad, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
-cfg_bool g_apply_search_naming({ 0x628a3db0, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x13 } }, false);
 cfg_bool g_fixed_search_playlist({ 0x628a3db1, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x17 } }, false);
 cfg_string g_fixed_search_playlist_name({ 0x628a3db2, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x17 } }, "LX 搜索结果");
 const GUID guid_preferences = { 0x85d64b47, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
@@ -960,10 +959,8 @@ public:
         g_download_cleanup = IsDlgButtonChecked(IDC_LX_DOWNLOAD_CLEANUP) == BST_CHECKED;
         g_download_overrides = IsDlgButtonChecked(IDC_LX_DOWNLOAD_OVERRIDES) == BST_CHECKED;
         g_auto_updates = IsDlgButtonChecked(IDC_LX_AUTO_UPDATES) == BST_CHECKED;
-        g_apply_search_naming = IsDlgButtonChecked(IDC_LX_APPLY_SEARCH_NAMING) == BST_CHECKED;
         g_fixed_search_playlist = IsDlgButtonChecked(IDC_LX_FIXED_SEARCH_PLAYLIST) == BST_CHECKED;
         g_fixed_search_playlist_name = search_playlist.c_str();
-        refresh_playlist_payload_info();
         changed_ = false;
         callback_->on_state_changed();
         start_update_checks();
@@ -984,7 +981,6 @@ public:
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_OVERRIDES, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_SKIP_FAILURES, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_CLEANUP, BN_CLICKED, OnChanged)
-        COMMAND_HANDLER(IDC_LX_APPLY_SEARCH_NAMING, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_FIXED_SEARCH_PLAYLIST, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_FIXED_SEARCH_PLAYLIST_NAME, CBN_EDITCHANGE, OnChanged)
         COMMAND_HANDLER(IDC_LX_FIXED_SEARCH_PLAYLIST_NAME, CBN_SELCHANGE, OnChanged)
@@ -1026,7 +1022,6 @@ private:
         CheckDlgButton(IDC_LX_DOWNLOAD_OVERRIDES, defaults || g_download_overrides ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(IDC_LX_DOWNLOAD_SKIP_FAILURES, defaults || g_download_skip_failures ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(IDC_LX_DOWNLOAD_CLEANUP, !defaults && g_download_cleanup ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(IDC_LX_APPLY_SEARCH_NAMING, !defaults && g_apply_search_naming ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(IDC_LX_FIXED_SEARCH_PLAYLIST, !defaults && g_fixed_search_playlist ? BST_CHECKED : BST_UNCHECKED);
         uSetDlgItemText(*this, IDC_LX_FIXED_SEARCH_PLAYLIST_NAME,
             defaults ? "LX 搜索结果" : g_fixed_search_playlist_name.get().c_str());
@@ -1067,8 +1062,6 @@ static preferences_page_factory_t<preferences_page_lxmusic> g_preferences_page;
 
 } // namespace
 
-std::string download_naming_template() { return g_download_naming.get().c_str(); }
-bool apply_naming_to_search() { return g_apply_search_naming; }
 bool automatic_updates_enabled() { return g_auto_updates; }
 bool use_fixed_search_playlist() { return g_fixed_search_playlist; }
 std::string fixed_search_playlist_name() { return g_fixed_search_playlist_name.get().c_str(); }

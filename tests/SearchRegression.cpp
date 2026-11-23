@@ -103,27 +103,10 @@ int main() {
         check(entries[0].source != entries[1].source && entries[0].keyword == entries[1].keyword, "different sources merged history");
         check(decode_search_history("broken\n" + history).size() == 20, "corrupt history discarded valid entries");
         check(decode_search_history(std::string(600000, 'x')).empty(), "oversized history was processed");
-        Payload display;
-        display.fields.resize(pf_count);
-        display.fields[pf_kind] = "track";
-        display.fields[pf_title] = "曲名";
-        display.fields[pf_artist] = "歌手";
-        display.fields[pf_album] = "专辑";
-        display.fields[pf_preferred_quality] = "flac";
-        check(format_track_display_title(display, "{序号} - {曲名} - {艺术家}", 2, 12) ==
-            "02 - 曲名 - 歌手", "search result display ignored naming template");
-        check(format_track_display_title(display, "{专辑名}_{序号}_{曲名}_{音质}", 1, 99) ==
-            "专辑_01_曲名_flac", "search result display lost naming fields");
-        check(format_track_display_title(display, "{文件名}", 1, 1) == "曲名",
-            "search result display lost filename alias");
-        rejects([&] { format_track_display_title(display, "{未知}", 1, 1); },
-            "unsupported display naming field was accepted");
         Payload collection;
         collection.fields.resize(pf_count);
         collection.fields[pf_kind] = "album";
         collection.fields[pf_title] = "专辑搜索结果";
-        check(format_track_display_title(collection, "{序号} - {曲名}", 3, 30) == "专辑搜索结果",
-            "collection result was formatted as a track filename");
         collection.fields[pf_kind] = "playlist";
         collection.fields[pf_collection_kind] = "Ranking";
         check(is_ranking_payload(collection), "ranking payload was not recognized");
@@ -142,8 +125,11 @@ int main() {
         check(collection_result_label(collection) == "榜单 ? - 00", "browser removed legitimate title punctuation");
         auto ranking = encode_payload(collection.fields);
         check(has_collection_results({ranking}), "ranking did not open in the collection browser");
-        display.fields[pf_version] = "1";
-        auto song = encode_payload(display.fields);
+        Payload track;
+        track.fields.resize(pf_count);
+        track.fields[pf_version] = "1";
+        track.fields[pf_kind] = "track";
+        auto song = encode_payload(track.fields);
         check(!has_collection_results({song}), "track-only results did not stay in the native playlist");
         next.fields[pf_version] = "1";
         auto navigation = encode_payload(next.fields);

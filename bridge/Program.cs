@@ -24,6 +24,7 @@ namespace LxMusic.Bridge.Online
                 if (args.Length < 2) throw new InvalidOperationException("缺少命令或数据目录");
                 var command = args[0].Trim().ToLowerInvariant();
                 AppPaths.Initialize(PayloadCodec.DecodeText(args[1]));
+                UpdateInstaller.CleanupStages(AppPaths.File("updates"));
 
                 if (command == "download-name-preview")
                 {

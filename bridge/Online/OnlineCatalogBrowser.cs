@@ -59,7 +59,7 @@ namespace LxMusic.Bridge.Online
 
         public static OnlineCollectionPage FeaturedPlaylists(OnlinePlatform platform, int page, int limit)
         {
-            if (ReferenceEquals(platform, OnlinePlatform.Qq)) return QqPlaylists("10000000", page, limit);
+            if (ReferenceEquals(platform, OnlinePlatform.Qq)) return QqRecommendPlaylists(page, limit);
             if (ReferenceEquals(platform, OnlinePlatform.Kugou)) return KugouPlaylists(page, limit);
             if (ReferenceEquals(platform, OnlinePlatform.Netease)) return NeteasePlaylists("全部", page, limit);
             if (ReferenceEquals(platform, OnlinePlatform.Kuwo)) return KuwoPlaylists(null, page, limit);
@@ -70,7 +70,7 @@ namespace LxMusic.Bridge.Online
         {
             if (category == null || category.Kind != OnlineCollectionKind.Category)
                 throw new InvalidOperationException("所选项目不是歌单分类");
-            if (ReferenceEquals(category.Platform, OnlinePlatform.Qq)) return QqPlaylists(category.Id, page, limit);
+            if (ReferenceEquals(category.Platform, OnlinePlatform.Qq)) return QqCategoryPlaylists(category.Id, page, limit);
             if (ReferenceEquals(category.Platform, OnlinePlatform.Netease)) return NeteasePlaylists(category.Id, page, limit);
             if (ReferenceEquals(category.Platform, OnlinePlatform.Kuwo)) return KuwoPlaylists(category.Id, page, limit);
             throw new InvalidOperationException("该站点暂不支持展开歌单分类");
@@ -273,20 +273,35 @@ namespace LxMusic.Bridge.Online
             return SliceCollections(collections, page, limit);
         }
 
+        // QQ playlist square, aligned with LX Music Mobile 1.9.2 tx/songList.js (getTag / getRecommendList / getList).
+        // The old fcg_get_diss_by_tag.fcg still lists playlists, but their details now come back empty.
+        private static JObject QqMusicu(JObject request)
+        {
+            var root = GetJson("https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&inCharset=utf-8&outCharset=utf-8&data=" +
+                Uri.EscapeDataString(request.ToString(Formatting.None)), "https://y.qq.com/");
+            if (root.Value<int?>("code") != 0) throw new InvalidOperationException("QQ音乐歌单读取失败");
+            return root;
+        }
+
         private static OnlineCollectionPage QqCategories(int page, int limit)
         {
-            var root = GetJson("https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_tag_conf.fcg?format=json&inCharset=utf8&outCharset=utf-8",
-                "https://y.qq.com/");
-            if (root.Value<int?>("code") != 0) throw new InvalidOperationException("QQ音乐歌单分类读取失败");
+            var root = QqMusicu(new JObject
+            {
+                ["tags"] = new JObject
+                {
+                    ["method"] = "get_all_categories", ["param"] = new JObject { ["qq"] = "" },
+                    ["module"] = "playlist.PlaylistAllCategoriesServer"
+                }
+            });
             var collections = new List<OnlineCollection>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var group in (root.SelectToken("data.categories") as JArray ?? new JArray()).OfType<JObject>())
+            foreach (var group in (root.SelectToken("tags.data.v_group") as JArray ?? new JArray()).OfType<JObject>())
             {
-                var groupName = TextUtil.HtmlDecode(group.Value<string>("categoryGroupName"));
-                foreach (var item in (group["items"] as JArray ?? new JArray()).OfType<JObject>())
+                var groupName = TextUtil.HtmlDecode(group.Value<string>("group_name"));
+                foreach (var item in (group["v_item"] as JArray ?? new JArray()).OfType<JObject>())
                 {
-                    var id = item.Value<string>("categoryId") ?? string.Empty;
-                    var title = TextUtil.HtmlDecode(item.Value<string>("categoryName"));
+                    var id = item.Value<string>("id") ?? string.Empty;
+                    var title = TextUtil.HtmlDecode(item.Value<string>("name"));
                     if (id.Length == 0 || title.Length == 0 || !seen.Add(id)) continue;
                     collections.Add(new OnlineCollection
                     {
@@ -359,41 +374,74 @@ namespace LxMusic.Bridge.Online
             return SliceCollections(collections, page, limit);
         }
 
-        private static OnlineCollectionPage QqPlaylists(string categoryId, int page, int limit)
+        private static OnlineCollectionPage QqRecommendPlaylists(int page, int limit)
         {
             var safePage = Math.Max(1, page);
             var safeLimit = Math.Max(1, Math.Min(50, limit));
-            var begin = (safePage - 1) * safeLimit;
-            var root = GetJson(OnlineHttp.Query("https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg",
-                new Dictionary<string, object>
-                {
-                    ["picmid"] = 1, ["g_tk"] = 5381, ["loginUin"] = 0, ["hostUin"] = 0,
-                    ["format"] = "json", ["inCharset"] = "utf8", ["outCharset"] = "utf-8",
-                    ["notice"] = 0, ["platform"] = "yqq.json", ["needNewCode"] = 0,
-                    ["categoryId"] = categoryId, ["sortId"] = 5, ["sin"] = begin,
-                    ["ein"] = begin + safeLimit - 1
-                }), "https://y.qq.com/");
-            if (root.Value<int?>("code") != 0) throw new InvalidOperationException("QQ音乐精选歌单读取失败");
-            var data = root["data"] as JObject ?? new JObject();
-            var list = data["list"] as JArray ?? new JArray();
-            var collections = new List<OnlineCollection>();
-            foreach (var item in list.OfType<JObject>())
+            var root = QqMusicu(new JObject
             {
-                var id = item.Value<string>("dissid") ?? string.Empty;
-                var title = TextUtil.HtmlDecode(item.Value<string>("dissname"));
-                if (id.Length == 0 || title.Length == 0) continue;
-                collections.Add(new OnlineCollection
+                ["comm"] = new JObject { ["cv"] = 1602, ["ct"] = 20 },
+                ["playlist"] = new JObject
                 {
-                    Platform = OnlinePlatform.Qq,
-                    Id = id,
-                    Title = title,
-                    Subtitle = (item["creator"] as JObject)?.Value<string>("name") ?? string.Empty,
-                    ArtworkUrl = Https(item.Value<string>("imgurl")),
-                    Kind = OnlineCollectionKind.Playlist
-                });
-            }
+                    ["module"] = "music.playlist.PlaylistSquare", ["method"] = "GetRecommendWhole",
+                    ["param"] = new JObject
+                    {
+                        ["IsReqFeed"] = true,
+                        ["FeedReq"] = new JObject { ["From"] = (safePage - 1) * safeLimit, ["Size"] = safeLimit }
+                    }
+                }
+            });
+            var feed = root.SelectToken("playlist.data.FeedRsp") as JObject ?? new JObject();
+            var list = feed["List"] as JArray ?? new JArray();
+            var collections = list.OfType<JObject>().Select(item => QqPlaylist(item.SelectToken("Playlist.basic") as JObject))
+                .Where(item => item != null).ToList();
             return new OnlineCollectionPage { Collections = collections }
-                .WithPagination(safePage, safeLimit, data.Value<int?>("sum"), list.Count);
+                .WithPagination(safePage, safeLimit, feed.Value<int?>("FromLimit"), list.Count);
+        }
+
+        private static OnlineCollectionPage QqCategoryPlaylists(string categoryId, int page, int limit)
+        {
+            if (!int.TryParse(categoryId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+                throw new InvalidOperationException("QQ音乐歌单分类无效，请重新打开分类列表");
+            var safePage = Math.Max(1, page);
+            var safeLimit = Math.Max(1, Math.Min(50, limit));
+            var root = QqMusicu(new JObject
+            {
+                ["comm"] = new JObject { ["cv"] = 1602, ["ct"] = 20 },
+                ["playlist"] = new JObject
+                {
+                    ["method"] = "get_category_content", ["module"] = "playlist.PlayListCategoryServer",
+                    ["param"] = new JObject
+                    {
+                        ["titleid"] = id, ["caller"] = "0", ["category_id"] = id, ["size"] = safeLimit,
+                        ["page"] = safePage - 1, ["use_page"] = 1
+                    }
+                }
+            });
+            var content = root.SelectToken("playlist.data.content") as JObject ?? new JObject();
+            var list = content["v_item"] as JArray ?? new JArray();
+            var collections = list.OfType<JObject>().Select(item => QqPlaylist(item["basic"] as JObject))
+                .Where(item => item != null).ToList();
+            return new OnlineCollectionPage { Collections = collections }
+                .WithPagination(safePage, safeLimit, content.Value<int?>("total_cnt"), list.Count);
+        }
+
+        private static OnlineCollection QqPlaylist(JObject basic)
+        {
+            var id = basic?.Value<string>("tid") ?? string.Empty;
+            var title = TextUtil.HtmlDecode(basic?.Value<string>("title"));
+            if (id.Length == 0 || id == "0" || title.Length == 0) return null;
+            var cover = basic["cover"] as JObject;
+            return new OnlineCollection
+            {
+                Platform = OnlinePlatform.Qq,
+                Id = id,
+                Title = title,
+                Subtitle = TextUtil.HtmlDecode(basic.SelectToken("creator.nick")?.ToString()),
+                ArtworkUrl = Https(cover?.Value<string>("medium_url") ?? cover?.Value<string>("default_url")),
+                TrackCount = Math.Max(0, basic.Value<int?>("song_cnt") ?? 0),
+                Kind = OnlineCollectionKind.Playlist
+            };
         }
 
         private static OnlineCollectionPage NeteasePlaylists(string category, int page, int limit)

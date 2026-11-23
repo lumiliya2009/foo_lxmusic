@@ -3,11 +3,11 @@ using System.IO;
 
 namespace LxMusic.Bridge
 {
-    internal static class AppPaths
+    public static class AppPaths
     {
         private static string _baseDirectory;
 
-        internal static void Initialize(string directory)
+        public static void Initialize(string directory)
         {
             if (string.IsNullOrWhiteSpace(directory)) throw new ArgumentException("数据目录为空", nameof(directory));
             _baseDirectory = Path.GetFullPath(directory);

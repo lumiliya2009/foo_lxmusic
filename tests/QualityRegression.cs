@@ -239,6 +239,9 @@ lx.send(lx.EVENT_NAMES.inited, { sources: { tx: { type: 'music', actions: ['musi
         var custom = Bridge("search", "custom_music", "track", Encode("测试"), "1", "3", "flac", second);
         Check(custom.Code == 0 && custom.Lines.Any(line => line[0] == "ITEM"), "source-declared custom platform was not searchable");
         Check(Bridge("source-options").Lines.Single(line => line[0] == "SOURCE" && line[3] == "1")[1] == second, "search did not persist source choice");
+        var library = Path.Combine(profile, "online-source.json");
+        var saved = File.ReadAllBytes(library);
+        Check(Bridge("select-source", second).Code == 0 && File.ReadAllBytes(library).SequenceEqual(saved), "reselecting the active source rewrote the library");
         var pinned = Bridge("resolve", Payload(), "flac", "-", first);
         Check(pinned.Code == 0 && pinned.Lines.Any(line => line[0] == "SOURCEID" && line[1] == first), "playback did not keep its original source");
         Check(Bridge("source-options").Lines.Single(line => line[0] == "SOURCE" && line[3] == "1")[1] == second, "pinned playback changed active source");
@@ -568,10 +571,13 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl','mu
             "Qishui local pagination incorrect");
         if (live)
         {
+            // Live checks build stores directly, so they need a data directory of their own.
+            LxMusic.Bridge.AppPaths.Initialize(Path.Combine(profile, "live"));
             var playlistRepository = new OnlineMusicRepository(new OnlineSourceStore(), new OnlineAccountStore());
             var accountPlaylists = new OnlinePlaylistService(playlistRepository).LookupInput("826050338");
-            Check(accountPlaylists.Any(item => item.Title == "我喜欢" && item.Platform == OnlinePlatform.Qq),
-                "live QQ lookup did not include the liked-songs list");
+            Check(accountPlaylists.Count(item => item.Title == "我喜欢") == 1 &&
+                new OnlinePlaylistService(playlistRepository).Tracks(accountPlaylists.First(item => item.Title == "我喜欢"), 1).Tracks.Count > 3,
+                "live QQ lookup returned the stale liked-songs list");
             TestSourceProxy();
             foreach (var platform in new[] { OnlinePlatform.Kuwo, OnlinePlatform.Migu, OnlinePlatform.Qishui })
             {
@@ -594,6 +600,9 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl','mu
                     Check(playlists.Collections.Count > 0 &&
                         playlists.Collections.All(item => item.Kind == OnlineCollectionKind.Playlist),
                         "live featured playlists returned no valid items: " + platform.Id);
+                    // Listing is not enough: QQ once listed playlists whose details came back empty.
+                    Check(new OnlinePlaylistService(playlistRepository).Tracks(playlists.Collections[0], 1).Tracks.Count > 0,
+                        "live featured playlist opened empty: " + platform.Id);
                 }
                 if (OnlineCatalogBrowser.SupportsCategories(platform))
                 {
@@ -604,8 +613,19 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl','mu
                     var categoryPlaylists = OnlineCatalogBrowser.CategoryPlaylists(categories.Collections[0], 1, 3);
                     Check(categoryPlaylists.Collections.Count > 0,
                         "live playlist category could not be opened: " + platform.Id);
+                    Check(new OnlinePlaylistService(playlistRepository).Tracks(categoryPlaylists.Collections[0], 1).Tracks.Count > 0,
+                        "live category playlist opened empty: " + platform.Id);
                 }
                 Console.WriteLine(platform.Label + ": available catalog browse entries readable");
+            }
+            foreach (var platform in new[] { OnlinePlatform.Qq, OnlinePlatform.Kugou, OnlinePlatform.Netease })
+            {
+                var artists = ArtistCatalog.Search(platform, "周杰伦", 1, 3);
+                Check(artists.Collections.Count > 0, "live artist search returned nothing: " + platform.Id);
+                var artistTracks = ArtistCatalog.Tracks(artists.Collections[0], 1, 10);
+                Check(artistTracks.Tracks.Count > 0 && artistTracks.Tracks.All(track => track.Platform == platform),
+                    "live artist songs were not readable: " + platform.Id);
+                Console.WriteLine(platform.Label + ": artist search and songs readable");
             }
             var discover = OnlineCatalogBrowser.DiscoverTracks(OnlinePlatform.Qishui, 1, 10);
             Check(discover.Tracks.Count > 0 &&

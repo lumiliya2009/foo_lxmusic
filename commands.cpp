@@ -2,6 +2,8 @@
 #include <cstring>
 #include <atomic>
 #include <ctime>
+#include <deque>
+#include <unordered_map>
 
 namespace lxmusic {
 
@@ -1187,6 +1189,15 @@ void command_switch_quality(metadb_handle_list_cref items, const std::string& qu
 
     bool undo_created = false;
 
+    // Scan the playlist once: replacing an item in place keeps every other position valid.
+    const auto count = playlists->playlist_get_item_count(active);
+    std::unordered_map<const metadb_handle*, std::deque<size_t>> positions;
+    for (size_t position = 0; position < count; ++position) {
+        metadb_handle_ptr candidate;
+        if (playlists->playlist_get_item_handle(candidate, active, position))
+            positions[candidate.get_ptr()].push_back(position);
+    }
+
     for (size_t i = 0; i < items.get_count(); ++i) {
         try {
             std::string encoded;
@@ -1198,54 +1209,38 @@ void command_switch_quality(metadb_handle_list_cref items, const std::string& qu
             const auto new_encoded = rebuild_payload_with_quality(encoded, quality);
             const auto new_uri = payload_to_uri(new_encoded);
 
-            // Find this item's position in the active playlist
-            const auto count = playlists->playlist_get_item_count(active);
-            for (size_t pi = 0; pi < count; ++pi) {
-                metadb_handle_ptr h;
-                if (!playlists->playlist_get_item_handle(h, active, pi)) continue;
-                if (h == items[i]) {
-                    // Check if this is the currently playing track
-                    if (is_playing && now_playing.is_valid() && now_playing == items[i]) {
-                        resume_position = pc->playback_get_position();
-                    }
+            // Find this item's position in the active playlist (each duplicate entry is used once)
+            const auto found = positions.find(items[i].get_ptr());
+            if (found == positions.end() || found->second.empty()) continue;
+            const auto pi = found->second.front();
+            found->second.pop_front();
 
-                    // Create new handle with the new URI
-                    auto new_handle = metadb::get()->handle_create(new_uri.c_str(), 0);
-                    auto new_payload = decode_payload(new_encoded);
-                    size_t track_number = 0, track_total = 0;
-                    for (size_t position = 0; position < count; ++position) {
-                        metadb_handle_ptr candidate;
-                        std::string candidate_encoded;
-                        Payload candidate_payload;
-                        if (playlists->playlist_get_item_handle(candidate, active, position) &&
-                            uri_to_payload(candidate->get_path(), candidate_encoded, &candidate_payload) &&
-                            candidate_payload.is_track()) {
-                            ++track_total;
-                            if (position <= pi) ++track_number;
-                        }
-                    }
-                    hint_payload_info(new_handle, new_payload, std::max<size_t>(1, track_number),
-                        std::max<size_t>(track_number, track_total));
+            // Check if this is the currently playing track
+            if (is_playing && now_playing.is_valid() && now_playing == items[i]) {
+                resume_position = pc->playback_get_position();
+            }
 
-                    // Replace: remove old, insert new at same position
-                    if (!undo_created) {
-                        playlists->playlist_undo_backup(active);
-                        undo_created = true;
-                    }
-                    pfc::bit_array_one remove_mask(pi);
-                    playlists->playlist_remove_items(active, remove_mask);
-                    metadb_handle_list new_list;
-                    new_list.add_item(new_handle);
-                    pfc::bit_array_true sel_mask;
-                    playlists->playlist_insert_items(active, pi, new_list, sel_mask);
-                    playlists->playlist_set_focus_item(active, pi);
+            // Create new handle with the new URI
+            auto new_handle = metadb::get()->handle_create(new_uri.c_str(), 0);
+            auto new_payload = decode_payload(new_encoded);
+            hint_payload_info(new_handle, new_payload);
 
-                    if (is_playing && now_playing.is_valid() && now_playing == items[i]) {
-                        resume_handle = new_handle;
-                        resume_playlist_index = pi;
-                    }
-                    break;
-                }
+            // Replace: remove old, insert new at same position
+            if (!undo_created) {
+                playlists->playlist_undo_backup(active);
+                undo_created = true;
+            }
+            pfc::bit_array_one remove_mask(pi);
+            playlists->playlist_remove_items(active, remove_mask);
+            metadb_handle_list new_list;
+            new_list.add_item(new_handle);
+            pfc::bit_array_true sel_mask;
+            playlists->playlist_insert_items(active, pi, new_list, sel_mask);
+            playlists->playlist_set_focus_item(active, pi);
+
+            if (is_playing && now_playing.is_valid() && now_playing == items[i]) {
+                resume_handle = new_handle;
+                resume_playlist_index = pi;
             }
         } catch (...) {}
     }
