@@ -309,6 +309,12 @@ void show_status(const std::string& message) {
     if (status.is_valid()) status->override_text(message.c_str());
 }
 
+void show_message_box(const std::string& title, const std::string& message, UINT flags) {
+    const auto title_w = wide(title);
+    const auto message_w = wide(message);
+    ::MessageBoxW(core_api::get_main_window(), message_w.c_str(), title_w.c_str(), flags);
+}
+
 void copy_text_to_clipboard(const std::string& text) {
     if (text.empty() || text.size() > 65536 || text.find('\0') != std::string::npos)
         throw std::runtime_error("无法复制无效文本");

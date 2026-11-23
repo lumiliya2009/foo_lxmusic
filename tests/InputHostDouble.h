@@ -165,12 +165,12 @@ struct playback_control {
     static playback_control* get() { static playback_control instance; return &instance; }
     void stop() { ++test_host::stops; test_host::playback_abort->abort(); }
 };
-struct popup_message {
-    static void g_complain(const char* title, const char* message) {
+namespace lxmusic {
+inline void show_message_box(const std::string& title, const std::string& message, unsigned) {
         if (!test_host::playback_abort->is_aborting()) throw std::runtime_error("popup appeared before playback stopped");
         test_host::popup_title = title; test_host::popup_text = message;
-    }
-};
+}
+}
 struct input_decoder {
     using ptr = service_ptr_t<input_decoder>;
     void initialize(unsigned, unsigned, abort_callback&) { test_host::media_failure("initialize"); test_host::check_failure(test_host::failure::initialize); }
