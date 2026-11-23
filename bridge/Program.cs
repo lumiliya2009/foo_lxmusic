@@ -14,7 +14,7 @@ namespace LxMusic.Bridge.Online
     {
         private const int DefaultLimit = 30;
 
-        private static int Main(string[] args)
+        internal static int Run(string[] args)
         {
             Console.OutputEncoding = new UTF8Encoding(false);
             Console.InputEncoding = new UTF8Encoding(false);
@@ -71,6 +71,7 @@ namespace LxMusic.Bridge.Online
                         case "import-url": ImportUrl(repository.Value, ArgText(args, 2)); break;
                         case "remove-source": repository.Value.ResetSource(args.Length > 2 ? args[2] : null); Ok("已删除音源"); break;
                         case "search": Search(repository.Value, args); break;
+                        case "playlist-lookup": PlaylistLookup(repository.Value, args); break;
                         case "expand": Expand(repository.Value, args); break;
                         case "resolve": Resolve(repository.Value, args); break;
                         case "lyrics": Lyrics(args); break;
@@ -263,6 +264,19 @@ namespace LxMusic.Bridge.Online
                 EmitPage(results, limit);
             }
             Ok("搜索完成");
+        }
+
+        private static void PlaylistLookup(OnlineMusicRepository repository, string[] args)
+        {
+            if (args.Length != 3) throw new InvalidOperationException("歌单查询参数不完整");
+            if (repository.Sources.State.Imported &&
+                !repository.Sources.State.Descriptor.Supports(OnlinePlatform.Qq))
+                throw new InvalidOperationException("当前音源不支持 QQ 音乐，无法播放这些歌单");
+            var input = ArgText(args, 2).Trim();
+            var playlists = new OnlinePlaylistService(repository).LookupInput(input);
+            foreach (var collection in playlists.GroupBy(item => item.Id).Select(group => group.First()))
+                Emit("ITEM", PayloadCodec.FromCollection(collection, "playlist", "flac"));
+            Ok("找到 " + playlists.Select(item => item.Id).Distinct().Count() + " 个歌单");
         }
 
         private static void EmitPage(OnlinePage result, int limit) => Emit("PAGE",

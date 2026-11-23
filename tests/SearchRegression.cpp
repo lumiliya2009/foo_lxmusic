@@ -129,6 +129,9 @@ int main() {
         check(is_ranking_payload(collection), "ranking payload was not recognized");
         collection.fields[pf_collection_kind] = "Playlist";
         check(!is_ranking_payload(collection), "ordinary playlist was mistaken for a ranking");
+        collection.fields[pf_artist] = "测试用户 · 12 首";
+        check(collection_result_label(collection) == "专辑搜索结果 — 测试用户 · 12 首",
+            "ordinary playlist subtitle was not displayed");
         collection.fields[pf_version] = "1";
         collection.fields[pf_collection_kind] = "Ranking";
         collection.fields[pf_title] = "飙升榜";
@@ -155,6 +158,15 @@ int main() {
         collection.fields[pf_title] = "测试专辑";
         collection.fields[pf_artist] = "测试歌手";
         check(collection_result_label(collection) == "测试专辑 — 测试歌手", "album artist was not displayed");
+        auto automatic = resolve_search_playlist_placement("LX QQ音乐 单曲 - 晴天", false, "");
+        check(automatic.name == "LX QQ音乐 单曲 - 晴天" && automatic.create_new,
+            "automatic search playlist placement was not preserved");
+        auto fixed = resolve_search_playlist_placement("LX QQ音乐 单曲 - 晴天", true, "  固定搜索  ");
+        check(fixed.name == "固定搜索" && !fixed.create_new,
+            "fixed search playlist should replace the named destination");
+        auto blankFixed = resolve_search_playlist_placement("LX QQ音乐 单曲 - 晴天", true, " \t ");
+        check(blankFixed.name == "LX QQ音乐 单曲 - 晴天" && blankFixed.create_new,
+            "blank fixed playlist name did not fall back safely");
         std::cout << checks << " search state/history regression checks passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

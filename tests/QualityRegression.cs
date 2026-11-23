@@ -14,6 +14,7 @@ static class QualityRegression
 {
     static int checks;
     static string profile;
+    static string bridgeExecutable;
     static void Check(bool value, string reason) { System.Threading.Interlocked.Increment(ref checks); if (!value) throw new Exception(reason); }
     static string Encode(string text) => Convert.ToBase64String(Encoding.UTF8.GetBytes(text)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     static string Decode(string text) { text = text.Replace('-', '+').Replace('_', '/'); return Encoding.UTF8.GetString(Convert.FromBase64String(text.PadRight((text.Length + 3) / 4 * 4, '='))); }
@@ -30,7 +31,7 @@ static class QualityRegression
     static Result Bridge(string command, params string[] args)
     {
         // Every argument is a fixed command, Base64URL payload or quality ID.
-        var start = new ProcessStartInfo(typeof(OnlineMusicRepository).Assembly.Location,
+        var start = new ProcessStartInfo(bridgeExecutable,
             string.Join(" ", new[] { command, Encode(profile) }.Concat(args)))
         {
             UseShellExecute = false, CreateNoWindow = true,
@@ -49,7 +50,7 @@ static class QualityRegression
 
     static Result BridgeInput(string command, string input, params string[] args)
     {
-        var start = new ProcessStartInfo(typeof(OnlineMusicRepository).Assembly.Location,
+        var start = new ProcessStartInfo(bridgeExecutable,
             string.Join(" ", new[] { command, Encode(profile) }.Concat(args)))
         {
             UseShellExecute = false, CreateNoWindow = true,
@@ -299,6 +300,16 @@ lx.send(lx.EVENT_NAMES.inited, { sources: { tx: { type: 'music', actions: ['musi
 
     static void TestCompatibility()
     {
+        Check(OnlinePlaylistInputParser.QqNumber("QQ：123456") == "123456",
+            "prefixed QQ number was not recognized");
+        Check(OnlinePlaylistInputParser.QqNumber(" 123456 ") == "123456",
+            "plain QQ number was not recognized");
+        Check(OnlinePlaylistInputParser.QqNumber("123") == null,
+            "short input was accepted as a QQ number");
+        var qqTarget = OnlinePlaylistInputParser.ParseUrl(
+            "https://y.qq.com/n/ryqq/playlist/3176469771");
+        Check(qqTarget != null && qqTarget.Platform == OnlinePlatform.Qq &&
+            qqTarget.Id == "3176469771", "QQ playlist share link was not parsed");
         const string script = @"
 /**
  * @name Compatibility fixture
@@ -557,6 +568,10 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl','mu
             "Qishui local pagination incorrect");
         if (live)
         {
+            var playlistRepository = new OnlineMusicRepository(new OnlineSourceStore(), new OnlineAccountStore());
+            var accountPlaylists = new OnlinePlaylistService(playlistRepository).LookupInput("826050338");
+            Check(accountPlaylists.Any(item => item.Title == "我喜欢" && item.Platform == OnlinePlatform.Qq),
+                "live QQ lookup did not include the liked-songs list");
             TestSourceProxy();
             foreach (var platform in new[] { OnlinePlatform.Kuwo, OnlinePlatform.Migu, OnlinePlatform.Qishui })
             {
@@ -656,6 +671,15 @@ lx.send(lx.EVENT_NAMES.inited,{sources:{wy:{type:'music',actions:['musicUrl'],qu
         Directory.CreateDirectory(profile);
         try
         {
+            // Exercise the deployed layout: only the embedded-dependency bridge
+            // executable and its config file are present.
+            var bridgeSource = typeof(OnlineMusicRepository).Assembly.Location;
+            var bridgeDirectory = Path.Combine(profile, "standalone-bridge");
+            Directory.CreateDirectory(bridgeDirectory);
+            bridgeExecutable = Path.Combine(bridgeDirectory, "foo_lx_bridge.exe");
+            File.Copy(bridgeSource, bridgeExecutable);
+            File.Copy(bridgeSource + ".config", bridgeExecutable + ".config");
+            Check(Bridge("status").Code == 0, "standalone embedded bridge could not start");
             TestConsole();
             TestOrdering();
             TestBridge();

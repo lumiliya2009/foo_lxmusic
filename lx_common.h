@@ -6,7 +6,7 @@ namespace lxmusic {
 
 constexpr const char* kSchemePrefix = "lxmusic://item/";
 constexpr const char* kSchemeSuffix = ".lxmusic";
-constexpr const char* kVersion = "0.1.16";
+constexpr const char* kVersion = "0.1.17";
 
 enum PayloadField : size_t {
     pf_version = 0,
@@ -38,6 +38,15 @@ struct Payload {
 bool is_ranking_payload(const Payload& payload);
 bool has_collection_results(const std::vector<std::string>& items);
 std::string collection_result_label(const Payload& payload);
+
+struct SearchPlaylistPlacement {
+    std::string name;
+    bool create_new = true;
+};
+SearchPlaylistPlacement resolve_search_playlist_placement(const std::string& automatic_name,
+    bool fixed_playlist_enabled, const std::string& fixed_playlist_name);
+bool use_fixed_search_playlist();
+std::string fixed_search_playlist_name();
 
 struct BridgeLine {
     std::vector<std::string> fields;
@@ -146,6 +155,7 @@ void fetch_browser_search_page(std::vector<std::string>& items, SearchPage& resu
 SourceAction show_source_manager(const std::vector<SourceOption>& sources, std::string& selected);
 bool show_source_editor(const std::string& title, std::string& script, std::string& revision);
 bool show_url_dialog(std::string& url);
+bool show_qq_playlists_dialog(std::string& input);
 bool show_update_dialog(const std::string& version, const std::string& changelog);
 void show_lyrics_dialog(const std::string& caption, const std::string& lyrics);
 void show_download_complete(const std::string& summary, const std::string& folder, HWND owner = nullptr);
@@ -155,6 +165,7 @@ bool show_download_dialog(std::vector<std::string>& payloads, std::string& folde
 
 void command_search();
 void command_browse();
+void command_qq_playlists();
 void command_page_previous();
 void command_page_next();
 void command_page_last();

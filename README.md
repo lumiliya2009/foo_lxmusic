@@ -4,12 +4,14 @@
 
 ## 下载
 
-- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.16/foo_lxmusic-0.1.16-fb1-x86.fb2k-component)
-- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.16/foo_lxmusic-0.1.16-fb2-x64.fb2k-component)
+- [foobar2000 v1.x · 32 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.17/foo_lxmusic-0.1.17-fb1-x86.fb2k-component)
+- [foobar2000 v2.x · 64 位](https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.17/foo_lxmusic-0.1.17-fb2-x64.fb2k-component)
 
 ## 使用
 
 安装后重启，在“文件 → LX 在线音乐 → 管理音源”导入脚本，搜索时选择音源和站点。回车打开或播放，退格返回上一层，右键下载或复制单首歌曲播放直链。直链有效期由音源决定。
+
+“获取 QQ 号歌单”可输入 QQ 号或公开歌单分享链接，查看公开自建歌单和“我喜欢”；打开歌单后按原顺序进入播放列表。
 
 音源管理会显示版本、作者、描述、支持站点与音质。在音源列表上右键可切换、编辑脚本、检查更新、复制来源地址或删除。
 
@@ -18,6 +20,8 @@
 在“首选项 → 工具 → LX 在线音乐”（或菜单“设置…”）保存下载默认值，也可选择是否显示下载前的临时设置。
 
 列表末尾可翻页、到尾页或输入页码跳转。搜索框保存最近 20 条记录，直接输入覆盖旧文字；多次搜索保留独立结果列表。
+
+在“首选项 → 工具 → LX 在线音乐”中可关闭固定列表模式，让每次歌曲搜索创建新列表；开启后搜索会覆盖指定名称的播放列表，列表不存在时自动创建。
 
 专辑、歌手、歌单和榜单在组件自己的浏览列表中显示，榜单只显示名称；打开后自动切回 foobar2000 歌曲列表，退格返回原来的浏览位置。直接搜索歌曲仍使用播放器列表。旧的榜单播放列表和歌曲搜索中的翻页项可选使用 [LX 显示列](PLAYLIST_DISPLAY.md)。
 

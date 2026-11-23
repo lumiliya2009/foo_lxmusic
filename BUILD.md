@@ -27,7 +27,7 @@ SDK-2025-03-07/
 
 输出位于 `dist/`。使用其他已安装的工具集时可传入 `-PlatformToolset`，例如 `./package.ps1 -PlatformToolset v143`；当前回归构建验证的是 `v145`。原生项目和 SDK 引用项目会使用同一个指定工具集。
 
-只编译桥接程序不需要 foobar2000 SDK：
+只编译桥接程序不需要 foobar2000 SDK。托管依赖会嵌入桥接 EXE：
 
 ```powershell
 dotnet build ./bridge/foo_lx_bridge.csproj -c Release -p:RestoreLockedMode=true
@@ -42,6 +42,8 @@ dotnet run --project ./tests/QualityRegression.csproj -c Release
 dotnet run --project ./tests/UpdateRegression.csproj -c Release
 ./tests/run-input-regression.ps1 -Platform Win32
 ./tests/run-input-regression.ps1 -Platform x64
+./tests/run-search-regression.ps1 -Platform x64
+./tests/run-navigation-regression.ps1 -Platform x64
 ```
 
 测试覆盖音质回退、采样率等播放信息、播放失败和取消、错误 MIME 类型、专辑分页、封面回退、下载中断以及文件保留。可选联网验证及宿主 UI 检查见 `tests/README.md`。反馈问题时请提供 foobar2000 版本、组件版本、平台和错误提示，勿附带音源订阅地址、账号 Cookie 或带凭据的播放链接。

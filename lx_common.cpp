@@ -75,9 +75,28 @@ bool is_ranking_payload(const Payload& payload) {
 
 std::string collection_result_label(const Payload& payload) {
     auto label = payload.get(pf_title);
-    if (payload.get(pf_kind) == "album" && !payload.get(pf_artist).empty())
+    if ((payload.get(pf_kind) == "album" ||
+        (payload.get(pf_kind) == "playlist" && !is_ranking_payload(payload))) &&
+        !payload.get(pf_artist).empty())
         label += " — " + payload.get(pf_artist);
     return label;
+}
+
+SearchPlaylistPlacement resolve_search_playlist_placement(const std::string& automatic_name,
+    bool fixed_playlist_enabled, const std::string& fixed_playlist_name) {
+    SearchPlaylistPlacement result;
+    auto fixed = fixed_playlist_name;
+    const auto not_space = [](unsigned char c) { return c != ' ' && c != '\t' && c != '\r' && c != '\n'; };
+    fixed.erase(fixed.begin(), std::find_if(fixed.begin(), fixed.end(), not_space));
+    fixed.erase(std::find_if(fixed.rbegin(), fixed.rend(), not_space).base(), fixed.end());
+    if (fixed_playlist_enabled && !fixed.empty()) {
+        result.name = fixed;
+        result.create_new = false;
+    } else {
+        result.name = automatic_name;
+        result.create_new = true;
+    }
+    return result;
 }
 
 std::string base64url_encode(const void* data, size_t bytes) {

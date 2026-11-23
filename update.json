@@ -1,23 +1,23 @@
 {
-  "tag_name": "v0.1.16",
-  "html_url": "https://github.com/lumiliya2009/foo_lxmusic/releases/tag/v0.1.16",
+  "tag_name": "v0.1.17",
+  "html_url": "https://github.com/lumiliya2009/foo_lxmusic/releases/tag/v0.1.17",
   "draft": false,
   "prerelease": false,
-  "changelog": "- 专辑、榜单等使用独立浏览列表，进入歌曲后切回 foobar2000 播放列表。\n- 修复关闭下载窗口、返回上层时的焦点问题。\n- 单页结果不再显示页数跳转。",
+  "changelog": "- 支持按 QQ 号或分享链接获取公开歌单和“我喜欢”。\n- 歌曲搜索可选择每次新建列表，或固定替换指定播放列表。\n- 桥接依赖改为内嵌加载，修复部分环境缺少 DLL。\n- 感谢 @xq1666 提供的依赖修复方案。",
   "assets": [
     {
-      "name": "foo_lxmusic-0.1.16-fb1-x86.fb2k-component",
-      "size": 1885617,
+      "name": "foo_lxmusic-0.1.17-fb1-x86.fb2k-component",
+      "size": 1886172,
       "state": "uploaded",
-      "browser_download_url": "https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.16/foo_lxmusic-0.1.16-fb1-x86.fb2k-component",
-      "digest": "sha256:892470c801c1292ba40ae130ff360ca413e32be73b453be4d392f0139469da17"
+      "browser_download_url": "https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.17/foo_lxmusic-0.1.17-fb1-x86.fb2k-component",
+      "digest": "sha256:fa122023bac7909e4b42880e206759f8d3d24e4ac8eff74829bc974feefa6683"
     },
     {
-      "name": "foo_lxmusic-0.1.16-fb2-x64.fb2k-component",
-      "size": 1914540,
+      "name": "foo_lxmusic-0.1.17-fb2-x64.fb2k-component",
+      "size": 1915507,
       "state": "uploaded",
-      "browser_download_url": "https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.16/foo_lxmusic-0.1.16-fb2-x64.fb2k-component",
-      "digest": "sha256:534c91fd4090b917f9494b76a7ebd6e862a7d49980832ed80dc82af47de41d99"
+      "browser_download_url": "https://github.com/lumiliya2009/foo_lxmusic/releases/download/v0.1.17/foo_lxmusic-0.1.17-fb2-x64.fb2k-component",
+      "digest": "sha256:347f1d46b20d08c055c838f19f89783cd15cefefe6b6cb2f743b5c5ccc7e4899"
     }
   ]
 }

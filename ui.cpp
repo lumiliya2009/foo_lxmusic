@@ -20,6 +20,8 @@ cfg_int g_download_workers({ 0x628a3dab, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x1
 cfg_bool g_download_overrides({ 0x628a3dac, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
 cfg_bool g_auto_updates({ 0x628a3dad, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x11 } }, true);
 cfg_bool g_apply_search_naming({ 0x628a3db0, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x13 } }, false);
+cfg_bool g_fixed_search_playlist({ 0x628a3db1, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x17 } }, false);
+cfg_string g_fixed_search_playlist_name({ 0x628a3db2, 0xab3d, 0x4da6, { 0xa4, 0x1d, 0xa6, 0x16, 0x92, 0x5b, 0xe1, 0x17 } }, "LX 搜索结果");
 const GUID guid_preferences = { 0x85d64b47, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 std::string dialog_text(HWND dialog, UINT id) {
@@ -603,6 +605,36 @@ public:
     LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
 };
 
+class qq_playlists_dialog : public CDialogImpl<qq_playlists_dialog> {
+public:
+    enum { IDD = IDD_LX_QQ_PLAYLISTS };
+    std::string value;
+
+    BEGIN_MSG_MAP(qq_playlists_dialog)
+        MSG_WM_INITDIALOG(OnInitDialog)
+        COMMAND_ID_HANDLER(IDOK, OnOK)
+        COMMAND_ID_HANDLER(IDCANCEL, OnCancel)
+    END_MSG_MAP()
+
+    BOOL OnInitDialog(CWindow, LPARAM) {
+        CenterWindow(GetParent());
+        CEdit(GetDlgItem(IDC_LX_QQ_PLAYLIST_INPUT)).LimitText(4096);
+        GetDlgItem(IDC_LX_QQ_PLAYLIST_INPUT).SetFocus();
+        return FALSE;
+    }
+    LRESULT OnOK(WORD, WORD, HWND, BOOL&) {
+        value = dialog_text(*this, IDC_LX_QQ_PLAYLIST_INPUT);
+        if (value.empty()) {
+            MessageBoxW(L"请输入 QQ 号或 QQ 音乐歌单分享链接。", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
+            GetDlgItem(IDC_LX_QQ_PLAYLIST_INPUT).SetFocus();
+            return 0;
+        }
+        EndDialog(IDOK);
+        return 0;
+    }
+    LRESULT OnCancel(WORD, WORD, HWND, BOOL&) { EndDialog(IDCANCEL); return 0; }
+};
+
 class lyrics_dialog : public CDialogImpl<lyrics_dialog> {
 public:
     enum { IDD = IDD_LX_LYRICS };
@@ -907,6 +939,18 @@ public:
             GetDlgItem(IDC_LX_DOWNLOAD_NAMING).SetFocus();
             return;
         }
+        auto search_playlist = dialog_text(*this, IDC_LX_FIXED_SEARCH_PLAYLIST_NAME);
+        const auto not_space = [](unsigned char c) { return c != ' ' && c != '\t' && c != '\r' && c != '\n'; };
+        search_playlist.erase(search_playlist.begin(),
+            std::find_if(search_playlist.begin(), search_playlist.end(), not_space));
+        search_playlist.erase(
+            std::find_if(search_playlist.rbegin(), search_playlist.rend(), not_space).base(),
+            search_playlist.end());
+        if (IsDlgButtonChecked(IDC_LX_FIXED_SEARCH_PLAYLIST) == BST_CHECKED && search_playlist.empty()) {
+            MessageBoxW(L"请输入固定播放列表的名称。", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
+            GetDlgItem(IDC_LX_FIXED_SEARCH_PLAYLIST_NAME).SetFocus();
+            return;
+        }
         g_download_folder = dialog_text(*this, IDC_LX_FOLDER).c_str();
         static const char* qualities[] = { "128k", "320k", "flac", "flac24bit" };
         g_download_quality = qualities[std::clamp(CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_QUALITY)).GetCurSel(), 0, 3)];
@@ -917,6 +961,8 @@ public:
         g_download_overrides = IsDlgButtonChecked(IDC_LX_DOWNLOAD_OVERRIDES) == BST_CHECKED;
         g_auto_updates = IsDlgButtonChecked(IDC_LX_AUTO_UPDATES) == BST_CHECKED;
         g_apply_search_naming = IsDlgButtonChecked(IDC_LX_APPLY_SEARCH_NAMING) == BST_CHECKED;
+        g_fixed_search_playlist = IsDlgButtonChecked(IDC_LX_FIXED_SEARCH_PLAYLIST) == BST_CHECKED;
+        g_fixed_search_playlist_name = search_playlist.c_str();
         refresh_playlist_payload_info();
         changed_ = false;
         callback_->on_state_changed();
@@ -939,6 +985,9 @@ public:
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_SKIP_FAILURES, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_DOWNLOAD_CLEANUP, BN_CLICKED, OnChanged)
         COMMAND_HANDLER(IDC_LX_APPLY_SEARCH_NAMING, BN_CLICKED, OnChanged)
+        COMMAND_HANDLER(IDC_LX_FIXED_SEARCH_PLAYLIST, BN_CLICKED, OnChanged)
+        COMMAND_HANDLER(IDC_LX_FIXED_SEARCH_PLAYLIST_NAME, CBN_EDITCHANGE, OnChanged)
+        COMMAND_HANDLER(IDC_LX_FIXED_SEARCH_PLAYLIST_NAME, CBN_SELCHANGE, OnChanged)
         COMMAND_HANDLER(IDC_LX_BROWSE, BN_CLICKED, OnBrowse)
         COMMAND_HANDLER(IDC_LX_CHECK_NOW, BN_CLICKED, OnCheck)
     END_MSG_MAP()
@@ -952,6 +1001,15 @@ private:
         for (const auto label : { L"128K", L"320K", L"FLAC", L"Hi-Res / 24bit" }) quality.AddString(label);
         auto workers = CComboBox(GetDlgItem(IDC_LX_DOWNLOAD_WORKERS));
         for (int i = 1; i <= 16; ++i) workers.AddString(std::to_wstring(i).c_str());
+        auto playlists = playlist_manager::get();
+        auto target = CComboBox(GetDlgItem(IDC_LX_FIXED_SEARCH_PLAYLIST_NAME));
+        for (t_size index = 0; index < playlists->get_playlist_count(); ++index) {
+            pfc::string8 name;
+            if (playlists->playlist_get_name(index, name) && !name.is_empty()) {
+                pfc::stringcvt::string_wide_from_utf8 converted(name);
+                target.AddString(converted);
+            }
+        }
         fill_download_naming(GetDlgItem(IDC_LX_DOWNLOAD_NAMING), g_download_naming.get().c_str());
         Load(false);
         return FALSE;
@@ -969,9 +1027,18 @@ private:
         CheckDlgButton(IDC_LX_DOWNLOAD_SKIP_FAILURES, defaults || g_download_skip_failures ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(IDC_LX_DOWNLOAD_CLEANUP, !defaults && g_download_cleanup ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(IDC_LX_APPLY_SEARCH_NAMING, !defaults && g_apply_search_naming ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(IDC_LX_FIXED_SEARCH_PLAYLIST, !defaults && g_fixed_search_playlist ? BST_CHECKED : BST_UNCHECKED);
+        uSetDlgItemText(*this, IDC_LX_FIXED_SEARCH_PLAYLIST_NAME,
+            defaults ? "LX 搜索结果" : g_fixed_search_playlist_name.get().c_str());
         loading_ = false;
+        UpdateFixedSearchPlaylistState();
     }
-    LRESULT OnChanged(WORD, WORD, HWND, BOOL&) {
+    void UpdateFixedSearchPlaylistState() {
+        GetDlgItem(IDC_LX_FIXED_SEARCH_PLAYLIST_NAME).EnableWindow(
+            IsDlgButtonChecked(IDC_LX_FIXED_SEARCH_PLAYLIST) == BST_CHECKED ? TRUE : FALSE);
+    }
+    LRESULT OnChanged(WORD, WORD id, HWND, BOOL&) {
+        if (id == IDC_LX_FIXED_SEARCH_PLAYLIST) UpdateFixedSearchPlaylistState();
         if (!loading_) { changed_ = true; callback_->on_state_changed(); }
         return 0;
     }
@@ -1003,6 +1070,8 @@ static preferences_page_factory_t<preferences_page_lxmusic> g_preferences_page;
 std::string download_naming_template() { return g_download_naming.get().c_str(); }
 bool apply_naming_to_search() { return g_apply_search_naming; }
 bool automatic_updates_enabled() { return g_auto_updates; }
+bool use_fixed_search_playlist() { return g_fixed_search_playlist; }
+std::string fixed_search_playlist_name() { return g_fixed_search_playlist_name.get().c_str(); }
 void show_component_preferences() { ui_control::get()->show_preferences(guid_preferences); }
 
 bool show_search_dialog(SearchOptions& options, const std::vector<SourceOption>& sources) {
@@ -1056,6 +1125,13 @@ bool show_url_dialog(std::string& url) {
     url_dialog dialog;
     if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
     url = dialog.value;
+    return true;
+}
+
+bool show_qq_playlists_dialog(std::string& input) {
+    qq_playlists_dialog dialog;
+    if (dialog.DoModal(core_api::get_main_window()) != IDOK) return false;
+    input = std::move(dialog.value);
     return true;
 }
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
@@ -78,8 +78,6 @@ namespace LxMusic.Bridge.Online
                 result = OnlineCatalogBrowser.KuwoPlaylistTracks(collection, page);
             else
                 result = QqPlaylistTracks(collection, cookie, page);
-            if (collection.Kind != OnlineCollectionKind.Ranking)
-                result.Tracks = result.Tracks.OrderBy(t => t.Title, StringComparer.OrdinalIgnoreCase).ToList();
             return result;
         }
 
@@ -194,7 +192,12 @@ namespace LxMusic.Bridge.Online
             if (string.IsNullOrWhiteSpace(title)) title = TextUtil.HtmlDecode(item.Value<string>("name"));
             if (string.IsNullOrWhiteSpace(rawId) || rawId == "0" || string.IsNullOrWhiteSpace(title)) return null;
             var dirShow = item.Value<int?>("dir_show");
-            if (dirShow.HasValue && dirShow.Value == 0) return null;
+            var dirId = item.Value<int?>("dirid");
+            // The liked-songs directory is marked hidden from profile cards,
+            // but remains publicly readable through its dissid.
+            var likedSongs = (dirId.HasValue && dirId.Value == 4) ||
+                string.Equals(title, "我喜欢", StringComparison.Ordinal);
+            if (dirShow.HasValue && dirShow.Value == 0 && !likedSongs) return null;
 
             var count = item.Value<int?>("song_cnt") ?? item.Value<int?>("songnum") ?? item.Value<int?>("song_count") ?? 0;
             var parts = new List<string>();

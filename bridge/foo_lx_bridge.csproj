@@ -29,4 +29,12 @@
     <EmbeddedResource Include="Resources\console-preload.js" LogicalName="LxMusic.Resources.console-preload.js" />
     <EmbeddedResource Include="Resources\user-api-preload.js" LogicalName="LxMusic.Resources.user-api-preload.js" />
   </ItemGroup>
+
+  <Target Name="EmbedBridgeDependencies" BeforeTargets="AssignTargetPaths" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll'">
+        <LogicalName>LxMusic.Dependencies.%(Filename)%(Extension)</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
 </Project>

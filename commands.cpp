@@ -244,7 +244,10 @@ void show_new_search(async_state& state) {
     const auto title = search_playlist_name(state.page.options);
     if (has_collection_results(state.items)) show_collection_browser(state.items, title, &state.page);
     else {
-        const auto index = add_payloads_to_playlist(state.items, title, pfc_infinite, true);
+        const auto placement = resolve_search_playlist_placement(title,
+            use_fixed_search_playlist(), fixed_search_playlist_name());
+        const auto index = add_payloads_to_playlist(state.items, placement.name,
+            pfc_infinite, placement.create_new);
         mark_search_page(index, state.page);
     }
     if (state.page.options.type != "discover") remember_search(state.page.options);
@@ -663,6 +666,20 @@ void command_browse() {
                 },
                 [](async_state& browse) { show_new_search(browse); }, true);
         });
+}
+
+void command_qq_playlists() {
+    std::string input;
+    if (!show_qq_playlists_dialog(input)) return;
+    run_task("获取 QQ 号歌单",
+        [input](async_state& state, threaded_process_status&, abort_callback& abort) {
+            state.result = run_bridge({ "playlist-lookup", base64url_encode_text(input) }, abort);
+        },
+        [](async_state& state) {
+            auto items = bridge_items(state.result);
+            if (items.empty()) throw std::runtime_error("没有找到可浏览的歌单");
+            show_collection_browser(items, "QQ音乐歌单");
+        }, true);
 }
 
 void command_search_page(t_size playlist, t_size item) {
@@ -1261,28 +1278,30 @@ static const GUID guid_page_next = { 0x85d64b4b, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x
 static const GUID guid_page_last = { 0x85d64b4c, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 static const GUID guid_page_jump = { 0x85d64b4d, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 static const GUID guid_release_page = { 0x85d64b4e, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
+static const GUID guid_qq_playlists = { 0x85d64b4f, 0xc949, 0x409d,{ 0xa6, 0x8a, 0x5e, 0x31, 0xc5, 0x94, 0xef, 0x17 } };
 
 static mainmenu_group_popup_factory g_main_group(guid_main_group, mainmenu_groups::file,
     mainmenu_commands::sort_priority_dontcare, "LX 在线音乐");
 
 class main_commands : public mainmenu_commands {
 public:
-    enum { search, browse, page_previous, page_next, page_last, page_jump, manage, update, release_page, lyrics, back, settings, count };
+    enum { search, browse, qq_playlists, page_previous, page_next, page_last, page_jump, manage, update, release_page, lyrics, back, settings, count };
     t_uint32 get_command_count() override { return count; }
     GUID get_command(t_uint32 index) override {
-        static const GUID values[] = { guid_search, guid_browse, guid_page_previous, guid_page_next,
+        static const GUID values[] = { guid_search, guid_browse, guid_qq_playlists, guid_page_previous, guid_page_next,
             guid_page_last, guid_page_jump, guid_manage, guid_update, guid_release_page,
             guid_lyrics_main, guid_back, guid_settings };
         return index < count ? values[index] : pfc::guid_null;
     }
     void get_name(t_uint32 index, pfc::string_base& out) override {
-        static const char* values[] = { "搜索在线音乐…", "随便看看…", "上一页", "下一页",
+        static const char* values[] = { "搜索在线音乐…", "随便看看…", "获取 QQ 号歌单…", "上一页", "下一页",
             "跳到尾页", "页数跳转…", "管理音源…", "检查更新", "发布页",
             "获取所选歌曲歌词", "返回上一层", "设置…" };
         if (index < count) out = values[index];
     }
     bool get_description(t_uint32 index, pfc::string_base& out) override {
         if (index == browse) out = "选择音源和站点后浏览榜单或公开推荐，并直接显示在新的播放列表中。";
+        else if (index == qq_playlists) out = "输入 QQ 号或公开歌单链接，浏览该账号的公开自建歌单和“我喜欢”。";
         else if (index == page_previous) out = "切换到当前 LX 搜索结果的上一页。可在快捷键设置中绑定按键。";
         else if (index == page_next) out = "切换到当前 LX 搜索结果的下一页。可在快捷键设置中绑定按键。";
         else if (index == page_last) out = "切换到当前 LX 搜索结果能够访问的尾页。可在快捷键设置中绑定按键。";
@@ -1303,6 +1322,7 @@ public:
         switch (index) {
         case search: command_search(); break;
         case browse: command_browse(); break;
+        case qq_playlists: command_qq_playlists(); break;
         case page_previous: command_page_previous(); break;
         case page_next: command_page_next(); break;
         case page_last: command_page_last(); break;
