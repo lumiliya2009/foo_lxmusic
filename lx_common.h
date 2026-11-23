@@ -119,6 +119,7 @@ std::vector<std::string> bridge_items(const BridgeResult& result);
 std::string bridge_message(const BridgeResult& result, const char* record = "OK");
 std::string bridge_error(const BridgeResult& result);
 void show_status(const std::string& message);
+void show_message_box(const std::string& title, const std::string& message, UINT flags);
 void copy_text_to_clipboard(const std::string& text);
 file::ptr open_audio_stream(const std::string& url, abort_callback& abort);
 
