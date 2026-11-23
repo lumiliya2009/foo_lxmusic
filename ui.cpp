@@ -154,9 +154,11 @@ public:
         if (site && site->categories) add_collection(6);
         type.SetCurSel(selected_row);
         GetDlgItem(IDOK).EnableWindow(site != nullptr && site->searchable);
-        uSetDlgItemText(*this, IDC_LX_STATUS, !site ? "当前音源没有可搜索的站点。" :
-            !site->searchable ? "音源支持此站点的播放解析，但未提供搜索接口。" :
+        uSetDlgItemText(*this, IDC_LX_STATUS, !site || !site->searchable ? "" :
             site->collections || site->rankings || site->categories ? "可搜索，也可浏览精选歌单、榜单和歌单分类。" : "此站点支持单曲搜索，结果中按回车播放。" );
+        if (!site || !site->searchable)
+            MessageBoxW(!site ? L"当前音源没有可搜索的站点，请选择其他音源。" :
+                L"音源支持此站点的播放解析，但未提供搜索接口。", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
     }
     LRESULT OnSourceChanged(WORD, WORD, HWND, BOOL&) { FillSites(); return 0; }
     LRESULT OnSiteChanged(WORD, WORD, HWND, BOOL&) {
@@ -298,10 +300,11 @@ public:
         combo.SetCurSel(combo.GetCount() > 0 ? selected : -1);
         const auto site = SelectedSite();
         GetDlgItem(IDOK).EnableWindow(site ? TRUE : FALSE);
-        uSetDlgItemText(*this, IDC_LX_STATUS, !site ?
-            "当前音源没有可随便看看的站点。" :
+        uSetDlgItemText(*this, IDC_LX_STATUS, !site ? "" :
             site->rankings || site->categories ? "确认后打开当前站点的榜单；可继续按回车浏览集合。" :
             "确认后显示汽水公开目录里的随机音乐结果。");
+        if (!site)
+            MessageBoxW(L"当前音源没有可随便看看的站点，请选择其他音源。", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
     }
 
     LRESULT OnSourceChanged(WORD, WORD, HWND, BOOL&) { FillSites(); return 0; }
@@ -393,6 +396,8 @@ public:
         list.SetCurSel(current);
         list.SetFocus();
         UpdateDetails();
+        if (sources.empty())
+            MessageBoxW(L"尚未导入音源，请使用“从文件导入”或“从网址导入”添加脚本。", L"管理音源", MB_OK | MB_ICONINFORMATION);
         return TRUE;
     }
     void OnDestroy() { if (source_list_.IsWindow()) source_list_.UnsubclassWindow(); }
@@ -402,7 +407,7 @@ public:
     }
     void UpdateDetails() {
         const auto source = SelectedSource();
-        uSetDlgItemText(*this, IDC_LX_SOURCE_DETAILS, source ? source->details.c_str() : "尚未导入音源。");
+        uSetDlgItemText(*this, IDC_LX_SOURCE_DETAILS, source ? source->details.c_str() : "");
     }
     LRESULT OnSelectionChanged(WORD, WORD, HWND, BOOL&) { UpdateDetails(); return 0; }
     LRESULT OnContextMenu(UINT, WPARAM source, LPARAM position, BOOL&) {
@@ -466,7 +471,7 @@ public:
             if (!source || source->url.empty()) return 0;
             try {
                 copy_text_to_clipboard(source->url);
-                show_status("已复制音源地址");
+                MessageBoxW(L"已复制音源地址", L"管理音源", MB_OK | MB_ICONINFORMATION);
             } catch (const std::exception& ex) {
                 ::MessageBoxW(*this, pfc::stringcvt::string_wide_from_utf8(ex.what()),
                     L"复制音源地址", MB_OK | MB_ICONINFORMATION);
@@ -752,7 +757,9 @@ public:
         const auto generation = state->generation;
         const auto pattern = dialog_text(*this, IDC_LX_DOWNLOAD_NAMING);
         if (pattern.empty()) {
-            uSetDlgItemText(*this, IDC_LX_DOWNLOAD_PREVIEW, "请输入文件命名格式");
+            state->error = "请输入文件命名格式。";
+            uSetDlgItemText(*this, IDC_LX_DOWNLOAD_PREVIEW, "");
+            GetDlgItem(IDOK).EnableWindow(TRUE);
             return;
         }
         const auto selected_quality = SelectedQuality();
@@ -769,8 +776,9 @@ public:
             fb2k::inMainThread([state, generation, message, valid] {
                 if (!state->window || state->generation != generation) return;
                 state->valid = valid;
-                uSetDlgItemText(state->window, IDC_LX_DOWNLOAD_PREVIEW, message.c_str());
-                ::EnableWindow(::GetDlgItem(state->window, IDOK), valid ? TRUE : FALSE);
+                state->error = valid ? "" : message;
+                uSetDlgItemText(state->window, IDC_LX_DOWNLOAD_PREVIEW, valid ? message.c_str() : "");
+                ::EnableWindow(::GetDlgItem(state->window, IDOK), TRUE);
             });
         });
     }
@@ -794,7 +802,12 @@ public:
     }
 
     LRESULT OnOK(WORD, WORD, HWND, BOOL&) {
-        if (!preview->valid) { GetDlgItem(IDC_LX_DOWNLOAD_NAMING).SetFocus(); return 0; }
+        if (!preview->valid) {
+            const auto message = preview->error.empty() ? "正在生成文件名示例，请稍候。" : preview->error.c_str();
+            MessageBoxW(pfc::stringcvt::string_wide_from_utf8(message), L"文件命名格式无效", MB_OK | MB_ICONINFORMATION);
+            GetDlgItem(IDC_LX_DOWNLOAD_NAMING).SetFocus();
+            return 0;
+        }
         folder = dialog_text(*this, IDC_LX_FOLDER);
         if (folder.empty()) {
             MessageBoxW(L"请选择下载目录。", L"LX 在线音乐", MB_OK | MB_ICONINFORMATION);
@@ -864,7 +877,7 @@ private:
     }
 
     static constexpr UINT_PTR preview_timer = 21;
-    struct preview_state { HWND window = nullptr; size_t generation = 0; bool valid = false; };
+    struct preview_state { HWND window = nullptr; size_t generation = 0; bool valid = false; std::string error; };
     std::shared_ptr<preview_state> preview = std::make_shared<preview_state>();
 
     std::string SelectedQuality() {
@@ -876,6 +889,7 @@ private:
         if (!preview->window) return;
         ++preview->generation;
         preview->valid = false;
+        preview->error.clear();
         GetDlgItem(IDOK).EnableWindow(FALSE);
         uSetDlgItemText(*this, IDC_LX_DOWNLOAD_PREVIEW, "正在生成示例…");
         KillTimer(preview_timer);

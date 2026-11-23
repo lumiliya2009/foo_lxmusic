@@ -13,14 +13,7 @@ $privateEndpointSource = Join-Path $projectRoot 'bridge\PrivateUpdateEndpoint.g.
 $privateEndpointFile = Join-Path $projectRoot 'build\private-update-endpoint.txt'
 $bridgePackageFiles = @(
     'foo_lx_bridge.exe',
-    'foo_lx_bridge.exe.config',
-    'Acornima.dll',
-    'Jint.dll',
-    'Newtonsoft.Json.dll',
-    'System.Buffers.dll',
-    'System.Memory.dll',
-    'System.Numerics.Vectors.dll',
-    'System.Runtime.CompilerServices.Unsafe.dll'
+    'foo_lx_bridge.exe.config'
 )
 $version = '0.1.16'
 

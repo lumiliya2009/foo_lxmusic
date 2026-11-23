@@ -14,7 +14,7 @@ namespace LxMusic.Bridge.Online
     {
         private const int DefaultLimit = 30;
 
-        private static int Main(string[] args)
+        internal static int Run(string[] args)
         {
             Console.OutputEncoding = new UTF8Encoding(false);
             Console.InputEncoding = new UTF8Encoding(false);
