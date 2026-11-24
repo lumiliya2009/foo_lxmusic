@@ -177,11 +177,11 @@ void run_task(const char* title, Worker worker, Done done, bool showItem = false
         fb2k::inMainThread([state, done, silentErrors] {
             try {
                 if (!state->error.empty()) {
-                    if (!silentErrors) popup_message::g_complain("LX 在线音乐操作失败", state->error.c_str());
+                    if (!silentErrors) show_message_box("LX 在线音乐操作失败", state->error, MB_OK | MB_ICONERROR);
                 }
                 else done(*state);
             } catch (const std::exception& ex) {
-                if (!silentErrors) popup_message::g_complain("LX 在线音乐操作失败", ex.what());
+                if (!silentErrors) show_message_box("LX 在线音乐操作失败", ex.what(), MB_OK | MB_ICONERROR);
             } catch (...) {}
         });
     });
@@ -323,7 +323,7 @@ void save_source_edit(const std::string& id, const std::string& revision,
                 command_manage_sources();
                 return;
             }
-            popup_message::g_complain("保存音源失败", state->error.c_str());
+            show_message_box("保存音源失败", state->error, MB_OK | MB_ICONERROR);
             std::string retry_script = script;
             std::string retry_revision = revision;
             if (show_source_editor(title + "（校验失败，内容已保留）", retry_script, retry_revision))
@@ -631,7 +631,7 @@ void command_search() {
         [](async_state& state) {
             const auto sources = source_options(state.result);
             if (sources.empty()) {
-                popup_message::g_show("请先在“文件 → LX 在线音乐 → 管理音源”导入脚本。", "LX 在线音乐");
+                show_message_box("LX 在线音乐", "请先在“文件 → LX 在线音乐 → 管理音源”导入脚本。", MB_OK | MB_ICONINFORMATION);
                 return;
             }
             SearchOptions options;
@@ -657,7 +657,7 @@ void command_browse() {
                 });
             });
             if (!available) {
-                popup_message::g_show("当前音源没有可用于随便看看的站点。", "LX 在线音乐");
+                show_message_box("LX 在线音乐", "当前音源没有可用于随便看看的站点。", MB_OK | MB_ICONINFORMATION);
                 return;
             }
             SearchOptions options;
@@ -730,7 +730,9 @@ void command_search_page(t_size playlist, t_size item) {
                 mark_search_page(target, state.page);
                 if (state.page.options.type != "discover") remember_search(state.page.options);
             }, true);
-    } catch (const std::exception& ex) { popup_message::g_complain("搜索结果翻页失败", ex.what()); }
+    } catch (const std::exception& ex) {
+        show_message_box("搜索结果翻页失败", ex.what(), MB_OK | MB_ICONERROR);
+    }
 }
 
 namespace {
@@ -936,7 +938,7 @@ void command_check_update(bool automatic) {
                         [download, pending](threaded_process_callback::ctx_t, bool aborted) {
                             if (aborted) return;
                             if (!download->error.empty()) {
-                                popup_message::g_complain("LX 组件更新失败", download->error.c_str());
+                                show_message_box("LX 组件更新失败", download->error, MB_OK | MB_ICONERROR);
                                 return;
                             }
                             for (const auto& record : download->result.lines) {
@@ -946,11 +948,11 @@ void command_check_update(bool automatic) {
                                     const auto marker = CreateFileW(pfc::stringcvt::string_wide_from_utf8(cancel.c_str()),
                                         GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
                                     if (marker != INVALID_HANDLE_VALUE) CloseHandle(marker);
-                                    popup_message::g_complain("LX 组件更新失败", "无法退出播放器，本次更新未安装");
+                                    show_message_box("LX 组件更新失败", "无法退出播放器，本次更新未安装", MB_OK | MB_ICONERROR);
                                 }
                                 return;
                             }
-                            popup_message::g_complain("LX 组件更新失败", "更新助手未就绪，原版本未改动");
+                            show_message_box("LX 组件更新失败", "更新助手未就绪，原版本未改动", MB_OK | MB_ICONERROR);
                         });
                     threaded_process::g_run_modal(task,
                         threaded_process::flag_show_abort | threaded_process::flag_show_progress |
@@ -1016,7 +1018,7 @@ void command_source_status() {
 
 void command_lyrics(metadb_handle_list_cref items) {
     if (items.get_count() == 0) {
-        popup_message::g_show("请先在播放列表中选择一首歌曲。", "LX 在线歌词");
+        show_message_box("LX 在线歌词", "请先在播放列表中选择一首歌曲。", MB_OK | MB_ICONINFORMATION);
         return;
     }
     std::string payload;
@@ -1025,7 +1027,7 @@ void command_lyrics(metadb_handle_list_cref items) {
         payload = lyric_payload_for_handle(items[0]);
         title = decode_payload(payload).get(pf_title);
     } catch (const std::exception& ex) {
-        popup_message::g_complain("无法读取所选歌曲信息", ex);
+        show_message_box("无法读取所选歌曲信息", ex.what(), MB_OK | MB_ICONERROR);
         return;
     }
     run_task("获取在线歌词",
@@ -1036,7 +1038,7 @@ void command_lyrics(metadb_handle_list_cref items) {
         [title](async_state& state) {
             const auto raw_lyrics = bridge_message(state.result, "LYRICS");
             if (raw_lyrics.empty()) {
-                popup_message::g_show("没有找到匹配的同步歌词。", "LX 在线歌词");
+                show_message_box("LX 在线歌词", "没有找到匹配的同步歌词。", MB_OK | MB_ICONINFORMATION);
                 return;
             }
             show_lyrics_dialog("在线歌词 - " + title, strip_lrc_timestamps(raw_lyrics));
@@ -1056,7 +1058,7 @@ void command_expand(metadb_handle_list_cref items) {
         } catch (...) {}
     }
     if (requests.empty()) {
-        popup_message::g_show("请选择专辑、歌手或歌单搜索结果。", "LX 在线音乐");
+        show_message_box("LX 在线音乐", "请选择专辑、歌手或歌单搜索结果。", MB_OK | MB_ICONINFORMATION);
         return;
     }
     const auto playlist = requests.size() == 1 ? "LX " + requests[0].title : "LX 展开结果";
